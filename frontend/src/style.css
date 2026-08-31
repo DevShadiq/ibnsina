@@ -155,7 +155,16 @@ label {
   font-weight: 750;
   line-height: 1.35;
 }
-.required-mark { color: var(--red-600); }
+.required-mark {
+  color: var(--red-600);
+  font-weight: 900;
+}
+.required-note {
+  margin: 16px 0 0;
+  color: var(--muted);
+  font-size: .78rem;
+  font-weight: 700;
+}
 input, select, textarea {
   width: 100%;
   min-height: 48px;

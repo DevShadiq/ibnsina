@@ -22,6 +22,7 @@ const employee = reactive({});
 const batches = ref([]);
 const education = ref([]);
 const children = ref([]);
+const sameAddress = ref(false);
 const batchNo = ref('');
 const approvalStatus = ref('PENDING');
 const message = ref('');
@@ -35,6 +36,7 @@ const approvalOptions = computed(() => [
   { value: 'REJECTED', label: 'Rejected' }
 ]);
 const batchOptions = computed(() => batches.value.map(batch => ({ value: batch.BATCH_NO, label: `${batch.BATCH_NO} (${batch.STATUS})` })));
+const requiresComplete = computed(() => approvalStatus.value === 'APPROVED');
 
 if (token) setAdminToken(token);
 
@@ -51,6 +53,21 @@ function onMaritalStatusChange() {
     employee.SPOSE_MARRIAGE_DATE = '';
     children.value = [];
   }
+}
+
+function copyPermanent() {
+  employee.PRESENT_VILLAGE = employee.PERMANENT_VILLAGE;
+  employee.PRESENT_POST = employee.PERMANENT_POST;
+  employee.PRESENT_THANA = employee.PERMANENT_THANA;
+  employee.PRESENT_DISTRICT = employee.PERMANENT_DISTRICT;
+}
+
+function toggleSameAddress() {
+  if (sameAddress.value) copyPermanent();
+}
+
+function onPermanentInput() {
+  if (sameAddress.value) copyPermanent();
 }
 
 async function load() {
@@ -119,80 +136,172 @@ onMounted(load);
 
     <section v-if="loading" class="card">Loading employee details…</section>
 
-    <form v-else class="form" novalidate @submit.prevent="save">
-      <section class="card">
-          <div class="section-title"><div><h2>{{ t('Employee Identity') }}</h2><p class="muted">Administrators can edit identity values, assign IPI, move the employee to another batch, and change approval status.</p></div></div>
-        <div class="grid">
-          <div class="field"><label>{{ t('Merit List ID') }}</label><input v-model="employee.MERITLIST_ID" required /></div>
-          <div class="field"><label>{{ t('Class ID') }}</label><input v-model="employee.CLASS_ID" required /></div>
-          <div class="field"><label>{{ t('IPI') }}</label><input v-model="employee.IPI" :placeholder="t('Optional')" /></div>
-          <div class="field"><label>{{ t('Batch') }}</label><AutoCompleteSelect v-model="batchNo" :options="batchOptions" required :placeholder="t('Search batch')" /></div>
-          <div class="field"><label>{{ t('Approval Status') }}</label><AutoCompleteSelect v-model="approvalStatus" :options="approvalOptions" :disabled="employee.APPROVAL_STATUS === 'DRAFT'" placeholder="Search approval status" /><small v-if="employee.APPROVAL_STATUS === 'DRAFT'" class="status-note">{{ t('Waiting for employee submission') }}</small></div>
+    <form v-else class="form" @submit.prevent="save">
+      <nav class="form-nav" :aria-label="t('Form sections')">
+        <a href="#identity">01 {{ t('Employee Identity') }}</a>
+        <a href="#basic">02 {{ t('Basic Information') }}</a>
+        <a href="#contact">03 {{ t('Contact & Identity') }}</a>
+        <a href="#address">04 {{ t('Address Information') }}</a>
+        <a href="#emergency">05 {{ t('Emergency Contact') }}</a>
+        <a href="#family">06 {{ t('Family Information') }}</a>
+        <a href="#guarantor">07 {{ t('Guarantor Information') }}</a>
+        <a href="#education">08 {{ t('Education') }}</a>
+      </nav>
+
+      <section id="identity" class="card">
+        <div class="section-title">
+          <div>
+            <h2 data-step="01">{{ t('Employee Identity') }}</h2>
+            <p class="muted">Administrators can edit identity values, assign IPI, move the employee to another batch, and change approval status.</p>
+          </div>
         </div>
+
+        <div class="grid">
+          <div class="field">
+            <label>{{ t('Merit List ID') }}<span class="required-mark"> *</span></label>
+            <input v-model="employee.MERITLIST_ID" required />
+          </div>
+          <div class="field">
+            <label>{{ t('Class ID') }}<span class="required-mark"> *</span></label>
+            <input v-model="employee.CLASS_ID" required />
+          </div>
+          <div class="field">
+            <label>{{ t('IPI') }}</label>
+            <input v-model="employee.IPI" :placeholder="t('Optional')" />
+          </div>
+          <div class="field">
+            <label>{{ t('Batch') }}<span class="required-mark"> *</span></label>
+            <AutoCompleteSelect v-model="batchNo" :options="batchOptions" required :placeholder="t('Search batch')" />
+          </div>
+          <div class="field">
+            <label>{{ t('Approval Status') }}<span class="required-mark"> *</span></label>
+            <AutoCompleteSelect
+              v-model="approvalStatus"
+              :options="approvalOptions"
+              :disabled="employee.APPROVAL_STATUS === 'DRAFT'"
+              required
+              placeholder="Search approval status"
+            />
+            <small v-if="employee.APPROVAL_STATUS === 'DRAFT'" class="status-note">{{ t('Waiting for employee submission') }}</small>
+          </div>
+        </div>
+
+        <p class="required-note"><span class="required-mark">*</span> {{ t('Required for approval; partial records can be saved before approval.') }}</p>
       </section>
 
-      <section class="card">
-        <h2>{{ t('Basic Information') }}</h2>
+      <section id="basic" class="card">
+        <div class="section-title"><h2 data-step="02">{{ t('Basic Information') }}</h2></div>
         <div class="grid">
-          <div class="field"><label>{{ t('Employee Name') }}</label><input v-model="employee.NAME" /><small class="field-hint">{{ t('As per SSC/Dakhil certificate') }}</small></div>
-          <div class="field"><label>{{ t('Birth Date') }}</label><DateInput v-model="employee.BIRTHDATE" /><small class="field-hint">{{ t('As per SSC/Dakhil certificate') }}</small></div>
-          <div class="field"><label>{{ t('Blood Group') }}</label><select v-model="employee.BLD_GROUP"><option value="">Select</option><option v-for="group in bloodGroups" :key="group" :value="group">{{ group }}</option></select></div>
+          <div class="field">
+            <label>{{ t('Employee Name') }}<span class="required-mark"> *</span></label>
+            <input v-model="employee.NAME" :required="requiresComplete" />
+            <small class="field-hint">{{ t('As per SSC/Dakhil certificate') }}</small>
+          </div>
+          <div class="field">
+            <label>{{ t('Birth Date') }}</label>
+            <DateInput v-model="employee.BIRTHDATE" />
+            <small class="field-hint">{{ t('As per SSC/Dakhil certificate') }}</small>
+          </div>
+          <div class="field">
+            <label>{{ t('Blood Group') }}</label>
+            <select v-model="employee.BLD_GROUP"><option value="">{{ t('Select') }}</option><option v-for="group in bloodGroups" :key="group" :value="group">{{ group }}</option></select>
+          </div>
           <div class="field"><label>{{ t('Nationality') }}</label><input v-model="employee.NATIONALITY" /></div>
           <div class="field"><label>{{ t('Height') }}</label><HeightInput v-model="employee.HEIGHT" /></div>
           <div class="field"><label>{{ t('Weight (kg)') }}</label><WeightInput v-model="employee.WEIGHT" /></div>
-          <div class="field"><label>{{ t('Gender') }}</label><select v-model="employee.GENDER"><option value="">Select</option><option value="M">{{ t('Male') }}</option><option value="F">{{ t('Female') }}</option></select></div>
-          <div class="field"><label>{{ t('Religion') }}</label><select v-model="employee.RELIGION"><option value="">Select</option><option value="I">{{ t('Islam') }}</option><option value="H">{{ t('Hindu') }}</option><option value="B">{{ t('Buddha') }}</option><option value="C">{{ t('Christian') }}</option></select></div>
-          <div class="field"><label>{{ t('Marital Status') }}</label><select v-model="employee.MARITAL_STATUS" @change="onMaritalStatusChange"><option value="">Select</option><option value="U">{{ t('Unmarried') }}</option><option value="M">{{ t('Married') }}</option></select></div>
+          <div class="field"><label>{{ t('Gender') }}</label><select v-model="employee.GENDER"><option value="">{{ t('Select') }}</option><option value="M">{{ t('Male') }}</option><option value="F">{{ t('Female') }}</option></select></div>
+          <div class="field"><label>{{ t('Religion') }}</label><select v-model="employee.RELIGION"><option value="">{{ t('Select') }}</option><option value="I">{{ t('Islam') }}</option><option value="H">{{ t('Hindu') }}</option><option value="B">{{ t('Buddha') }}</option><option value="C">{{ t('Christian') }}</option></select></div>
+          <div class="field"><label>{{ t('Marital Status') }}</label><select v-model="employee.MARITAL_STATUS" @change="onMaritalStatusChange"><option value="">{{ t('Select') }}</option><option value="U">{{ t('Unmarried') }}</option><option value="M">{{ t('Married') }}</option></select></div>
           <template v-if="employee.MARITAL_STATUS === 'M'">
-            <div class="field"><label>{{ t('Spouse Name') }}</label><input v-model="employee.SPOUSE_NAME" /></div>
+            <div class="field"><label>{{ t('Spouse Name') }}<span class="required-mark"> *</span></label><input v-model="employee.SPOUSE_NAME" :required="requiresComplete" /></div>
             <div class="field"><label>{{ t('Spouse Occupation') }}</label><input v-model="employee.SPOSE_OCCUPATION" /></div>
-            <div class="field"><label>{{ t('Spouse Phone') }}</label><PhoneInput v-model="employee.SPOUSE_PHONE" :required="false" /></div>
+            <div class="field"><label>{{ t('Spouse Phone') }}<span class="required-mark"> *</span></label><PhoneInput v-model="employee.SPOUSE_PHONE" :required="requiresComplete" /></div>
             <div class="field"><label>{{ t('Marriage Date') }}</label><DateInput v-model="employee.SPOSE_MARRIAGE_DATE" /></div>
           </template>
         </div>
       </section>
 
-      <section class="card">
-        <h2>{{ t('Contact & Identity') }}</h2>
+      <section id="contact" class="card">
+        <h2 data-step="03">{{ t('Contact & Identity') }}</h2>
         <div class="grid">
           <div class="field"><label>{{ t('Email') }}</label><input v-model="employee.EMAIL" type="email" /></div>
-          <div class="field"><label>{{ t('Primary Phone') }}</label><PhoneInput v-model="employee.PHONE" :required="false" autocomplete="tel" /></div>
-          <div class="field"><label>{{ t('Alternate Phone') }}</label><PhoneInput v-model="employee.PHONE1" :required="false" /></div>
+          <div class="field"><label>{{ t('Primary Phone') }}<span class="required-mark"> *</span></label><PhoneInput v-model="employee.PHONE" :required="requiresComplete" autocomplete="tel" /></div>
+          <div class="field"><label>{{ t('Alternate Phone') }}<span class="required-mark"> *</span></label><PhoneInput v-model="employee.PHONE1" :required="requiresComplete" /></div>
           <div class="field"><label>{{ t('NID') }}</label><NidInput v-model="employee.NID" /></div>
         </div>
       </section>
 
-      <section class="card">
-        <h2>{{ t('Address Information') }}</h2>
+      <section id="address" class="card">
+        <h2 data-step="04">{{ t('Address Information') }}</h2>
         <div class="address-grid">
-          <div class="address-box"><h3>{{ t('Permanent Address') }}</h3><label>{{ t('Village / House / Road') }}</label><input v-model="employee.PERMANENT_VILLAGE" /><label>{{ t('Post Office') }}</label><input v-model="employee.PERMANENT_POST" /><label>{{ t('Thana / Upazila') }}</label><input v-model="employee.PERMANENT_THANA" /><label>{{ t('District') }}</label><input v-model="employee.PERMANENT_DISTRICT" /></div>
-          <div class="address-box"><h3>{{ t('Present Address') }}</h3><label>{{ t('Village / House / Road') }}</label><input v-model="employee.PRESENT_VILLAGE" /><label>{{ t('Post Office') }}</label><input v-model="employee.PRESENT_POST" /><label>{{ t('Thana / Upazila') }}</label><input v-model="employee.PRESENT_THANA" /><label>{{ t('District') }}</label><input v-model="employee.PRESENT_DISTRICT" /></div>
+          <div class="address-box">
+            <h3>{{ t('Permanent Address') }}</h3>
+            <label>{{ t('Village / House / Road') }}</label><input v-model="employee.PERMANENT_VILLAGE" @input="onPermanentInput" />
+            <label>{{ t('Post Office') }}</label><input v-model="employee.PERMANENT_POST" @input="onPermanentInput" />
+            <label>{{ t('Thana / Upazila') }}</label><input v-model="employee.PERMANENT_THANA" @input="onPermanentInput" />
+            <label>{{ t('District') }}</label><input v-model="employee.PERMANENT_DISTRICT" @input="onPermanentInput" />
+          </div>
+          <div class="address-box">
+            <h3>{{ t('Present Address') }}</h3>
+            <label>{{ t('Village / House / Road') }}</label><input v-model="employee.PRESENT_VILLAGE" :disabled="sameAddress" />
+            <label>{{ t('Post Office') }}</label><input v-model="employee.PRESENT_POST" :disabled="sameAddress" />
+            <label>{{ t('Thana / Upazila') }}</label><input v-model="employee.PRESENT_THANA" :disabled="sameAddress" />
+            <label>{{ t('District') }}</label><input v-model="employee.PRESENT_DISTRICT" :disabled="sameAddress" />
+          </div>
+        </div>
+        <div class="copybar">
+          <label class="check"><input v-model="sameAddress" type="checkbox" @change="toggleSameAddress" />{{ t('Same as Permanent Address') }}</label>
+          <button type="button" @click="copyPermanent">{{ t('Copy Permanent → Present') }}</button>
         </div>
       </section>
 
-      <section class="card">
-        <h2>{{ t('Emergency Contact') }}</h2>
-        <div class="grid"><div class="field"><label>{{ t('Emergency Person') }}</label><input v-model="employee.EMGRCNY_PERSON" /></div><div class="field"><label>{{ t('Relationship') }}</label><input v-model="employee.EMGRCNY_RELATION" /></div><div class="field"><label>{{ t('Emergency Phone') }}</label><PhoneInput v-model="employee.EMGRCNY_PHONE" :required="false" /></div><div class="field"><label>{{ t('Emergency Address') }}</label><input v-model="employee.EMGRCNY_ADDRESS" /></div></div>
+      <section id="emergency" class="card">
+        <h2 data-step="05">{{ t('Emergency Contact') }}</h2>
+        <div class="grid">
+          <div class="field"><label>{{ t('Emergency Person') }}</label><input v-model="employee.EMGRCNY_PERSON" /></div>
+          <div class="field"><label>{{ t('Relationship') }}</label><input v-model="employee.EMGRCNY_RELATION" /></div>
+          <div class="field"><label>{{ t('Emergency Phone') }}<span class="required-mark"> *</span></label><PhoneInput v-model="employee.EMGRCNY_PHONE" :required="requiresComplete" /></div>
+          <div class="field"><label>{{ t('Emergency Address') }}</label><input v-model="employee.EMGRCNY_ADDRESS" /></div>
+        </div>
       </section>
 
-      <section class="card">
-        <h2>{{ t('Family Information') }}</h2>
-        <div class="grid"><div class="field"><label>{{ t('Father Name') }}</label><input v-model="employee.FATHER_NAME" /><small class="field-hint">{{ t('As per SSC/Dakhil certificate') }}</small></div><div class="field"><label>{{ t('Father Phone') }}</label><PhoneInput v-model="employee.FATHER_PHONE" :required="false" /></div><div class="field"><label>{{ t('Mother Name') }}</label><input v-model="employee.MOTHER_NAME" /></div><div class="field"><label>{{ t('Mother Phone') }}</label><PhoneInput v-model="employee.MOTHER_PHONE" :required="false" /></div></div>
+      <section id="family" class="card">
+        <h2 data-step="06">{{ t('Family Information') }}</h2>
+        <div class="grid">
+          <div class="field"><label>{{ t('Father Name') }}</label><input v-model="employee.FATHER_NAME" /><small class="field-hint">{{ t('As per SSC/Dakhil certificate') }}</small></div>
+          <div class="field"><label>{{ t('Father Phone') }}<span class="required-mark"> *</span></label><PhoneInput v-model="employee.FATHER_PHONE" :required="requiresComplete" /></div>
+          <div class="field"><label>{{ t('Mother Name') }}</label><input v-model="employee.MOTHER_NAME" /></div>
+          <div class="field"><label>{{ t('Mother Phone') }}<span class="required-mark"> *</span></label><PhoneInput v-model="employee.MOTHER_PHONE" :required="requiresComplete" /></div>
+        </div>
         <ChildInformation v-if="employee.MARITAL_STATUS === 'M'" v-model="children" />
       </section>
 
-      <section class="card">
-        <h2>{{ t('Guarantor Information') }}</h2>
-        <div class="grid"><div class="field"><label>{{ t('Guarantor Name') }}</label><input v-model="employee.GRNT_NAME" /></div><div class="field"><label>{{ t('Relationship') }}</label><input v-model="employee.GRNT_RELE" /></div><div class="field"><label>{{ t('Guarantor Father') }}</label><input v-model="employee.GRNT_FATHER" /></div><div class="field"><label>{{ t('Present Address') }}</label><input v-model="employee.GRNT_PRESENT_ADD" /></div><div class="field"><label>{{ t('Permanent Address') }}</label><input v-model="employee.GRNT_PERMANET_ADD" /></div><div class="field"><label>{{ t('Nationality') }}</label><input v-model="employee.GRNT_NATIONALITY" /></div><div class="field"><label>{{ t('Profession') }}</label><input v-model="employee.GRNT_PROFFESSION" /></div><div class="field"><label>{{ t('NID') }}</label><NidInput v-model="employee.GRNT_NID" /></div><div class="field"><label>{{ t('Mobile') }}</label><PhoneInput v-model="employee.GRNT_MOBILE" :required="false" /></div></div>
+      <section id="guarantor" class="card">
+        <h2 data-step="07">{{ t('Guarantor Information') }}</h2>
+        <div class="grid">
+          <div class="field"><label>{{ t('Guarantor Name') }}</label><input v-model="employee.GRNT_NAME" /></div>
+          <div class="field"><label>{{ t('Relationship') }}</label><input v-model="employee.GRNT_RELE" /></div>
+          <div class="field"><label>{{ t('Guarantor Father') }}</label><input v-model="employee.GRNT_FATHER" /></div>
+          <div class="field"><label>{{ t('Present Address') }}</label><input v-model="employee.GRNT_PRESENT_ADD" /></div>
+          <div class="field"><label>{{ t('Permanent Address') }}</label><input v-model="employee.GRNT_PERMANET_ADD" /></div>
+          <div class="field"><label>{{ t('Nationality') }}</label><input v-model="employee.GRNT_NATIONALITY" /></div>
+          <div class="field"><label>{{ t('Profession') }}</label><input v-model="employee.GRNT_PROFFESSION" /></div>
+          <div class="field"><label>{{ t('NID') }}</label><NidInput v-model="employee.GRNT_NID" /></div>
+          <div class="field"><label>{{ t('Mobile') }}<span class="required-mark"> *</span></label><PhoneInput v-model="employee.GRNT_MOBILE" :required="requiresComplete" /></div>
+        </div>
       </section>
 
-      <section class="card">
-        <div class="section-title"><h2>{{ t('Education') }}</h2></div>
-        <p class="muted">Administrators can save partial education data.</p>
-        <EducationLevels v-model="education" :require-complete="false" />
+      <section id="education" class="card">
+        <div class="section-title"><h2 data-step="08">{{ t('Education') }}</h2></div>
+        <p v-if="requiresComplete" class="muted">{{ t('Levels 1–3 are required. Level 4 is optional.') }}</p>
+        <p v-else class="muted">Administrators can save partial education data. Levels 1–3 become required when approving the employee.</p>
+        <EducationLevels v-model="education" :require-complete="requiresComplete" mark-complete-fields />
       </section>
 
-      <section class="sticky-actions"><router-link class="button-link" to="/admin">{{ t('Cancel') }}</router-link><button class="primary" type="submit" :disabled="saving">{{ t(saving ? 'Saving…' : 'Save Employee Changes') }}</button></section>
+      <section class="sticky-actions">
+        <router-link class="button-link" to="/admin">{{ t('Cancel') }}</router-link>
+        <button class="primary" type="submit" :disabled="saving">{{ t(saving ? 'Saving…' : 'Save Employee Changes') }}</button>
+      </section>
     </form>
   </main>
 </template>

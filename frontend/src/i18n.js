@@ -31,6 +31,7 @@ const bn = {
   'Education Level': 'শিক্ষার স্তর',
   'Level': 'স্তর',
   'Required': 'আবশ্যিক',
+  'Required for approval; partial records can be saved before approval.': 'অনুমোদনের জন্য আবশ্যিক; অনুমোদনের আগে আংশিক তথ্য সংরক্ষণ করা যাবে।',
   'Board': 'শিক্ষা বোর্ড',
   'University': 'বিশ্ববিদ্যালয়',
   'Select or write university name': 'বিশ্ববিদ্যালয় নির্বাচন করুন অথবা নাম লিখুন',
