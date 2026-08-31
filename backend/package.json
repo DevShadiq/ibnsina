@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
-    "admin:create": "node src/create-admin.js"
+    "admin:create": "node src/create-admin.js",
+    "db:check": "node src/check-db.js"
   },
   "dependencies": {
     "@vercel/speed-insights": "^2.0.0",
@@ -17,7 +18,7 @@
     "express-rate-limit": "^8.0.1",
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.2",
-    "mysql2": "^3.14.3",
+    "pg": "^8.16.3",
     "uuid": "^11.1.0"
   }
 }

@@ -19,10 +19,11 @@ const hash = await bcrypt.hash(password, 12);
 await pool.execute(
   `INSERT INTO admin_user (USERNAME, PASSWORD_HASH, DISPLAY_NAME, USER_TYPE)
    VALUES (?, ?, ?, ?)
-   ON DUPLICATE KEY UPDATE PASSWORD_HASH = VALUES(PASSWORD_HASH),
-                           DISPLAY_NAME = VALUES(DISPLAY_NAME),
-                           USER_TYPE = VALUES(USER_TYPE),
-                           ACTIVE_YN = 'Y'`,
+   ON CONFLICT (USERNAME) DO UPDATE
+     SET PASSWORD_HASH = EXCLUDED.PASSWORD_HASH,
+         DISPLAY_NAME = EXCLUDED.DISPLAY_NAME,
+         USER_TYPE = EXCLUDED.USER_TYPE,
+         ACTIVE_YN = 'Y'`,
   [username, hash, displayName, userType]
 );
 

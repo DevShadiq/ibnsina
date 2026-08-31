@@ -123,7 +123,7 @@ UP_EMP.IPI = IPI000123
 HR_EMPEXAMDET.EMPCODE = IPI000123
 ```
 
-## MySQL important indexes
+## PostgreSQL important indexes
 
 ```text
 UNIQUE (batch_no, MERITLIST_ID, CLASS_ID)
@@ -153,8 +153,8 @@ cd backend && npm install
 cd ../frontend && npm install
 ```
 
-Create `backend/.env` from `backend/.env.example` and configure either your
-local MySQL server or your Aiven MySQL credentials. For Aiven, set `DB_SSL=true`.
+Create `backend/.env` from `backend/.env.example` and set `DATABASE_URL` to the
+pooled connection string from your Neon project.
 
 Start the API in one terminal:
 
@@ -174,13 +174,13 @@ Open the URL printed by Vite (normally `http://localhost:5173`). The Vite dev
 server proxies `/api` requests to `http://localhost:3003`, so no frontend API
 environment variable is required for local development.
 
-## Deploy to Vercel with Aiven MySQL
+## Deploy to Vercel with Neon PostgreSQL
 
 Deploy two Vercel projects from this repository:
 
 | Project | Root directory | Required production variables |
 | --- | --- | --- |
-| API | `backend` | `NODE_ENV=production`, `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME=employee_portal`, `DB_SSL=true`, `JWT_SECRET`, `FRONTEND_ORIGIN=https://YOUR-FRONTEND.vercel.app` |
+| API | `backend` | `NODE_ENV=production`, `DATABASE_URL` (pooled Neon URL), `DB_POOL_MAX=3`, `JWT_SECRET`, `FRONTEND_ORIGIN=https://YOUR-FRONTEND.vercel.app` |
 | Web | `frontend` | `VITE_API_URL=https://YOUR-BACKEND.vercel.app/api` |
 
 Redeploy each project whenever its environment variables change. Do not use
@@ -188,12 +188,9 @@ Redeploy each project whenever its environment variables change. Do not use
 exact frontend origin. A trailing slash is accepted, but this is the preferred
 form: `https://YOUR-FRONTEND.vercel.app`.
 
-If Aiven requires its private CA certificate, add `DB_SSL_CA` to the API
-project. Its value is the complete PEM content, including the `BEGIN
-CERTIFICATE` and `END CERTIFICATE` lines. Multiline text and literal `\n` line
-breaks are both supported. For local development, use
-`DB_SSL_CA_PATH=./ca.pem` instead and keep the downloaded certificate out of
-Git.
+Use the pooled Neon hostname (it contains `-pooler`) and retain
+`sslmode=require` in the connection URL. The backend also accepts
+`POSTGRES_URL` when the Vercel Neon integration supplies that name.
 
 To create the initial admin against the production database, download the API
 project's Vercel Production variables locally, run the command below from
@@ -206,15 +203,27 @@ npm run admin:create -- admin "use-a-strong-password" "Administrator"
 
 ## Migration note
 
-This V5 schema differs from the earlier version.
+The database schema is PostgreSQL/Neon compatible and differs from the earlier
+MySQL version.
 
 For a new/test database, simply run:
 
+Paste `database/employee_portal.sql` into the Neon SQL Editor and run it, or use:
+
 ```bash
-mysql -u root -p < database/schema.sql
+psql "$DATABASE_URL" -f database/employee_portal.sql
 ```
 
-If you already have real data in the earlier MySQL schema, do not drop it. Create a migration script instead.
+After setting `backend/.env`, verify the backend connection with:
+
+```bash
+cd backend
+npm run db:check
+```
+
+The supplied SQL file drops and recreates the application tables before loading
+the included seed data. Do not run it against a Neon database containing newer
+production data without a backup.
 
 ## Deploy to a physical server or VPS
 
@@ -241,20 +250,14 @@ For Nginx running on the same machine, use at least:
 HOST=127.0.0.1
 PORT=3003
 NODE_ENV=production
-DB_HOST=127.0.0.1
-DB_PORT=3306
-DB_USER=employee_portal_app
-DB_PASSWORD=REPLACE_WITH_A_STRONG_PASSWORD
-DB_NAME=employee_portal
-DB_SSL=false
+DATABASE_URL=postgresql://USER:PASSWORD@HOST-pooler.REGION.aws.neon.tech/DATABASE?sslmode=require
+DB_POOL_MAX=10
 JWT_SECRET=REPLACE_WITH_A_LONG_RANDOM_SECRET
 FRONTEND_ORIGIN=https://ibnsina.shadiqur.bd
 ```
 
-Import `database/schema.sql` only for a new empty database. The file
-`database/employee_portal_mysql.sql` is a data dump and will replace tables
-when imported; back up the database first and do not commit that dump because
-it contains real employee data.
+Import `database/employee_portal.sql` only for a new database or when you
+intentionally want to replace all application tables and load its seed data.
 
 Use the matching deployment files:
 

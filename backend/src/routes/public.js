@@ -427,7 +427,8 @@ router.post('/employee/save', async (req, res, next) => {
       const [result] = await conn.execute(
         `INSERT INTO up_emp
          (${insertCols.join(',')}, CREATED_AT)
-         VALUES (${insertCols.map(() => '?').join(',')}, NOW())`,
+         VALUES (${insertCols.map(() => '?').join(',')}, NOW())
+         RETURNING EMP_ENTRY_ID`,
         values
       );
 
