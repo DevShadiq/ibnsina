@@ -1,0 +1,23 @@
+-- Add optional child information to an existing PostgreSQL/Neon database.
+-- Run once before deploying the matching backend/frontend release.
+
+BEGIN;
+
+CREATE TABLE IF NOT EXISTS hr_empfamilydet (
+  emp_entry_id bigint NOT NULL,
+  empcode varchar(50),
+  fname varchar(100),
+  f_ocup varchar(70),
+  f_add varchar(100),
+  phone varchar(25),
+  child_nos bigint NOT NULL,
+  birth_date date,
+  PRIMARY KEY (emp_entry_id, child_nos),
+  CONSTRAINT fk_family_emp_entry FOREIGN KEY (emp_entry_id)
+    REFERENCES up_emp (emp_entry_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS ix_family_entry ON hr_empfamilydet (emp_entry_id);
+CREATE INDEX IF NOT EXISTS ix_family_empcode ON hr_empfamilydet (empcode);
+
+COMMIT;

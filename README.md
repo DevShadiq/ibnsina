@@ -339,3 +339,10 @@ npm run admin:create -- username password "Display Name" SUPER_ADMIN
 New-employee forms can be saved as incomplete drafts and submitted later.
 For an existing database, run `database/migration_allow_employee_drafts.sql`
 once before deploying the matching backend.
+
+## Existing database: employee child information
+
+Child information is optional and is available when an employee's marital
+status is Married. For an existing database, run
+`database/migration_add_employee_children.sql` once before deploying the
+matching backend and frontend.

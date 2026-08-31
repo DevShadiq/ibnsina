@@ -8,6 +8,7 @@ import {
   normalizePhone
 } from '../utils/phones.js';
 import { validateAndNormalizeEducation } from '../utils/education.js';
+import { validateAndNormalizeChildren } from '../utils/children.js';
 import { normalizeAndValidateMeasurements } from '../utils/measurements.js';
 import { normalizeAndValidateEmployeeNids } from '../utils/nid.js';
 
@@ -199,10 +200,20 @@ router.post('/employee/lookup', async (req, res, next) => {
       [employee.EMP_ENTRY_ID]
     );
 
+    const [children] = await conn.execute(
+      `SELECT EMP_ENTRY_ID, EMPCODE, FNAME, F_OCUP, F_ADD, PHONE,
+              CHILD_NOS, BIRTH_DATE
+         FROM hr_empfamilydet
+        WHERE EMP_ENTRY_ID = ?
+        ORDER BY CHILD_NOS`,
+      [employee.EMP_ENTRY_ID]
+    );
+
     res.json({
       found: true,
       employee,
       education,
+      children,
       batchNo: employee.batch_no,
       ...permission,
       canRequestUpdate:
@@ -261,13 +272,23 @@ router.post('/employee/new-entry', async (req, res, next) => {
           [existing.EMP_ENTRY_ID]
         );
 
+        const [children] = await conn.execute(
+          `SELECT EMP_ENTRY_ID, EMPCODE, FNAME, F_OCUP, F_ADD, PHONE,
+                  CHILD_NOS, BIRTH_DATE
+             FROM hr_empfamilydet
+            WHERE EMP_ENTRY_ID = ?
+            ORDER BY CHILD_NOS`,
+          [existing.EMP_ENTRY_ID]
+        );
+
         return res.json({
           canCreate: true,
           resumeDraft: true,
           activeBatch: active.BATCH_NO,
           identity: { meritlistId, classId },
           employee: existing,
-          education
+          education,
+          children
         });
       }
 
@@ -317,12 +338,22 @@ router.post('/employee/save', async (req, res, next) => {
   employee.PHONE = normalizePhone(employee.PHONE || identity.phone);
 
   const education = Array.isArray(req.body?.education) ? req.body.education : [];
+  const children = Array.isArray(req.body?.children) ? req.body.children : [];
 
   validateEmployee(employee, { required: submitForApproval });
 
   let normalizedEducation;
   try {
     normalizedEducation = validateAndNormalizeEducation(education, { required: submitForApproval });
+  } catch (e) {
+    return next(e);
+  }
+
+  let normalizedChildren;
+  try {
+    normalizedChildren = validateAndNormalizeChildren(children, {
+      married: employee.MARITAL_STATUS === 'M'
+    });
   } catch (e) {
     return next(e);
   }
@@ -518,6 +549,29 @@ router.post('/employee/save', async (req, res, next) => {
           row.REMARKS || null,
           row.INSTITUTE || null,
           row.SUBJECT_NAME || null
+        ]
+      );
+    }
+
+    await conn.execute(
+      `DELETE FROM hr_empfamilydet WHERE EMP_ENTRY_ID = ?`,
+      [empEntryId]
+    );
+
+    for (const [index, child] of normalizedChildren.entries()) {
+      await conn.execute(
+        `INSERT INTO hr_empfamilydet
+         (EMP_ENTRY_ID, EMPCODE, FNAME, F_OCUP, F_ADD, PHONE, CHILD_NOS, BIRTH_DATE)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          empEntryId,
+          ipi,
+          child.FNAME || null,
+          child.F_OCUP || null,
+          child.F_ADD || null,
+          child.PHONE || null,
+          index + 1,
+          child.BIRTH_DATE || null
         ]
       );
     }

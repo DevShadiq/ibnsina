@@ -1,15 +1,15 @@
 export const EDUCATION_LEVELS = [
-  'SSC / Dakhil',
-  'HSC / Alim',
-  'Fazil / Honours / BA / B.Sc',
-  'Masters / Kamil'
+  'SSC / Dakhil / Equivalent',
+  'HSC / Alim / Diploma / Equivalent',
+  'Fazil / Honours / BA / B.Sc / Degree Pass / Equivalent',
+  'Masters / Kamil / MBA / Equivalent'
 ];
 
 export const EDUCATION_LEVEL_OPTIONS = [
   ['SSC', 'Dakhil'],
-  ['HSC', 'Alim'],
-  ['Fazil', 'Honours', 'BA', 'B.Sc'],
-  ['Masters', 'Kamil']
+  ['HSC', 'Alim', 'Diploma'],
+  ['Fazil', 'Honours', 'BA', 'B.Sc', 'Degree Pass'],
+  ['Masters', 'Kamil', 'MBA']
 ];
 
 export const EDUCATION_BOARDS = [
@@ -118,22 +118,23 @@ function normalizedExamName(index, examName) {
 
   const lower = name.toLowerCase();
   if (index === 0) return /dakhil/.test(lower) ? 'Dakhil' : /ssc/.test(lower) ? 'SSC' : '';
-  if (index === 1) return /alim/.test(lower) ? 'Alim' : /hsc/.test(lower) ? 'HSC' : '';
+  if (index === 1) return /diploma/.test(lower) ? 'Diploma' : /alim/.test(lower) ? 'Alim' : /hsc/.test(lower) ? 'HSC' : '';
   if (index === 2) {
+    if (/degree\s*pass/.test(lower)) return 'Degree Pass';
     if (/fazil/.test(lower)) return 'Fazil';
     if (/honou?rs?/.test(lower)) return 'Honours';
     if (/b\.sc|bsc/.test(lower)) return 'B.Sc';
     if (/\bba\b/.test(lower)) return 'BA';
   }
-  if (index === 3) return /kamil/.test(lower) ? 'Kamil' : /master|\bma\b|m\.sc|msc|mba|m\.com|mcom|mbs|mss/.test(lower) ? 'Masters' : '';
+  if (index === 3) return /\bmba\b/.test(lower) ? 'MBA' : /kamil/.test(lower) ? 'Kamil' : /master|\bma\b|m\.sc|msc|m\.com|mcom|mbs|mss/.test(lower) ? 'Masters' : '';
   return '';
 }
 
 function levelIndex(examName) {
   const name = String(examName || '').toLowerCase();
   if (/ssc|dakhil/.test(name)) return 0;
-  if (/hsc|alim/.test(name)) return 1;
-  if (/fazil|honou?rs?|\bba\b|b\.sc|bsc/.test(name)) return 2;
+  if (/hsc|alim|diploma/.test(name)) return 1;
+  if (/fazil|honou?rs?|\bba\b|b\.sc|bsc|degree\s*pass/.test(name)) return 2;
   if (/master|kamil|\bma\b|m\.sc|msc|mba|m\.com|mcom|mbs|mss/.test(name)) return 3;
   return -1;
 }

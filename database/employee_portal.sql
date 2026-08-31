@@ -1,13 +1,13 @@
 -- PostgreSQL / Neon-compatible employee portal schema and seed data.
 -- Run this script while connected to the target Neon database. It replaces the
--- five application tables below, matching the destructive behavior of the
+-- application tables below, matching the destructive behavior of the
 -- original MySQL dump.
 
 BEGIN;
 
 SET LOCAL TIME ZONE 'UTC';
 
-DROP TABLE IF EXISTS hr_empexamdet, hr_update_request, up_emp,
+DROP TABLE IF EXISTS hr_empfamilydet, hr_empexamdet, hr_update_request, up_emp,
   hr_batch_control, admin_user CASCADE;
 
 CREATE TABLE admin_user (
@@ -121,6 +121,23 @@ CREATE TABLE hr_empexamdet (
 
 CREATE INDEX ix_exam_entry ON hr_empexamdet (emp_entry_id);
 CREATE INDEX ix_exam_empcode ON hr_empexamdet (empcode);
+
+CREATE TABLE hr_empfamilydet (
+  emp_entry_id bigint NOT NULL,
+  empcode varchar(50),
+  fname varchar(100),
+  f_ocup varchar(70),
+  f_add varchar(100),
+  phone varchar(25),
+  child_nos bigint NOT NULL,
+  birth_date date,
+  PRIMARY KEY (emp_entry_id, child_nos),
+  CONSTRAINT fk_family_emp_entry FOREIGN KEY (emp_entry_id)
+    REFERENCES up_emp (emp_entry_id) ON DELETE CASCADE
+);
+
+CREATE INDEX ix_family_entry ON hr_empfamilydet (emp_entry_id);
+CREATE INDEX ix_family_empcode ON hr_empfamilydet (empcode);
 
 CREATE TABLE hr_update_request (
   request_id uuid PRIMARY KEY,

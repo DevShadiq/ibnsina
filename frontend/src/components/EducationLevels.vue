@@ -34,6 +34,10 @@ function selectEducationBoard(item) {
     item.BOARD = 'Madrasa';
   }
 }
+
+function normalizePassYear(item) {
+  item.PASSYEAR = String(item.PASSYEAR || '').replace(/\D/g, '').slice(0, 4);
+}
 </script>
 
 <template>
@@ -95,7 +99,15 @@ function selectEducationBoard(item) {
 
       <div class="field">
         <label>{{ t('Pass Year') }}<span v-if="isRequired(index)"> *</span></label>
-        <input v-model="item.PASSYEAR" inputmode="numeric" :disabled="disabled" :required="isRequired(index)" />
+        <input
+          v-model="item.PASSYEAR"
+          inputmode="numeric"
+          pattern="[0-9]{4}"
+          maxlength="4"
+          :disabled="disabled"
+          :required="isRequired(index)"
+          @input="normalizePassYear(item)"
+        />
       </div>
 
       <div v-if="index >= 2" class="field">
