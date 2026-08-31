@@ -358,7 +358,8 @@ router.delete('/users/:userId', requireSuperAdmin, async (req, res, next) => {
 router.get('/batches', async (req, res, next) => {
   try {
     const [rows] = await pool.query(
-      `SELECT *
+      `SELECT BATCH_NO AS "BATCH_NO", STATUS, STARTED_AT, CLOSED_AT,
+              CREATED_BY, CREATED_AT, UPDATED_AT
          FROM hr_batch_control
         ORDER BY CREATED_AT DESC`
     );
@@ -474,7 +475,9 @@ router.put('/batches/:batchNo', requireSuperAdmin, async (req, res, next) => {
   try {
     await conn.beginTransaction();
     const [batches] = await conn.query(
-      `SELECT * FROM hr_batch_control FOR UPDATE`
+      `SELECT BATCH_NO AS "BATCH_NO", STATUS, STARTED_AT, CLOSED_AT,
+              CREATED_BY, CREATED_AT, UPDATED_AT
+         FROM hr_batch_control FOR UPDATE`
     );
     const existing = batches.find(row => row.BATCH_NO === currentBatchNo);
     if (!existing) {
@@ -1111,7 +1114,7 @@ router.get('/update-requests', async (req, res, next) => {
     }
 
     const [rows] = await pool.execute(
-      `SELECT r.*, e.NAME, e.PHONE
+      `SELECT r.*, r.BATCH_NO AS "BATCH_NO", e.NAME, e.PHONE
          FROM hr_update_request r
          JOIN up_emp e
            ON e.EMP_ENTRY_ID = r.EMP_ENTRY_ID

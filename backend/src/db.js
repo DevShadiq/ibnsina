@@ -54,8 +54,11 @@ function toPostgresPlaceholders(sql) {
 
 function normalizeRow(row) {
   const normalized = {};
+  const hasExplicitUpperBatchNo = Object.hasOwn(row, 'BATCH_NO');
 
   for (const [key, value] of Object.entries(row)) {
+    if (key === 'batch_no' && hasExplicitUpperBatchNo) continue;
+
     // The legacy MySQL schema intentionally exposed this one column and the
     // COUNT alias in lowercase. The frontend relies on that response shape.
     const outputKey = key === 'batch_no' || key === 'total'
