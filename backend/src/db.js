@@ -38,18 +38,101 @@ pgPool.on('error', error => {
   console.error('Unexpected PostgreSQL pool error:', error);
 });
 
-function toPostgresPlaceholders(sql) {
+export function toPostgresPlaceholders(sql) {
+  const source = String(sql);
   let index = 0;
-  let quoted = false;
+  let output = '';
+  let state = 'normal';
+  let dollarQuote = '';
 
-  return String(sql).replace(/''|'|\?/g, token => {
-    if (token === "''" && quoted) return token;
-    if (token === "'") {
-      quoted = !quoted;
-      return token;
+  for (let i = 0; i < source.length; i += 1) {
+    const char = source[i];
+    const next = source[i + 1];
+
+    if (state === 'single-quote') {
+      output += char;
+
+      if (char === "'" && next === "'") {
+        output += next;
+        i += 1;
+      } else if (char === "'") {
+        state = 'normal';
+      }
+      continue;
     }
-    return quoted ? token : `$${++index}`;
-  });
+
+    if (state === 'double-quote') {
+      output += char;
+
+      if (char === '"' && next === '"') {
+        output += next;
+        i += 1;
+      } else if (char === '"') {
+        state = 'normal';
+      }
+      continue;
+    }
+
+    if (state === 'line-comment') {
+      output += char;
+      if (char === '\n') state = 'normal';
+      continue;
+    }
+
+    if (state === 'block-comment') {
+      output += char;
+      if (char === '*' && next === '/') {
+        output += next;
+        i += 1;
+        state = 'normal';
+      }
+      continue;
+    }
+
+    if (state === 'dollar-quote') {
+      if (source.startsWith(dollarQuote, i)) {
+        output += dollarQuote;
+        i += dollarQuote.length - 1;
+        state = 'normal';
+      } else {
+        output += char;
+      }
+      continue;
+    }
+
+    if (char === "'") {
+      output += char;
+      state = 'single-quote';
+    } else if (char === '"') {
+      output += char;
+      state = 'double-quote';
+    } else if (char === '-' && next === '-') {
+      output += char + next;
+      i += 1;
+      state = 'line-comment';
+    } else if (char === '/' && next === '*') {
+      output += char + next;
+      i += 1;
+      state = 'block-comment';
+    } else if (char === '$') {
+      const match = source.slice(i).match(/^\$[A-Za-z_][A-Za-z0-9_]*\$|^\$\$/);
+
+      if (match) {
+        dollarQuote = match[0];
+        output += dollarQuote;
+        i += dollarQuote.length - 1;
+        state = 'dollar-quote';
+      } else {
+        output += char;
+      }
+    } else if (char === '?') {
+      output += `$${++index}`;
+    } else {
+      output += char;
+    }
+  }
+
+  return output;
 }
 
 function normalizeRow(row) {

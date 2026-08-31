@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
+    "test": "node --test",
     "admin:create": "node src/create-admin.js",
     "db:check": "node src/check-db.js"
   },
