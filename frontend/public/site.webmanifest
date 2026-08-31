@@ -1,0 +1,18 @@
+{
+  "name": "Employee Information Portal",
+  "short_name": "Employee Portal",
+  "description": "Employee information and update portal",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f3f7fb",
+  "theme_color": "#102a43",
+  "icons": [
+    {
+      "src": "/icon.png",
+      "sizes": "64x64",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
