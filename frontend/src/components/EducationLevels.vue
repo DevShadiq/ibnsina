@@ -25,7 +25,7 @@ function isRequired(index) {
   if (!props.requireComplete) return false;
   if (index < 3) return true;
   const row = rows.value[index] || {};
-  return ['EXAMNAME', 'BOARD', 'CLAS', 'PASSYEAR', 'INSTITUTE', 'EXAMGROUP', 'SUBJECT_NAME', 'REMARKS']
+  return ['EXAMNAME', 'BOARD', 'CLAS', 'PASSYEAR', 'INSTITUTE', 'EXAMGROUP', 'SUBJECT_NAME']
     .some(key => String(row[key] || '').trim());
 }
 
@@ -35,8 +35,8 @@ function selectEducationBoard(item) {
   }
 }
 
-function normalizePassYear(item) {
-  item.PASSYEAR = String(item.PASSYEAR || '').replace(/\D/g, '').slice(0, 4);
+function sanitizePassYear(item, event) {
+  item.PASSYEAR = event.target.value.replace(/\D/g, '').slice(0, 4);
 }
 </script>
 
@@ -102,11 +102,11 @@ function normalizePassYear(item) {
         <input
           v-model="item.PASSYEAR"
           inputmode="numeric"
-          pattern="[0-9]{4}"
           maxlength="4"
+          pattern="[0-9]{4}"
           :disabled="disabled"
           :required="isRequired(index)"
-          @input="normalizePassYear(item)"
+          @input="sanitizePassYear(item, $event)"
         />
       </div>
 
@@ -120,10 +120,6 @@ function normalizePassYear(item) {
         <input v-model="item.INSTITUTE" :disabled="disabled" />
       </div>
 
-      <div class="field">
-        <label>{{ t('Remarks') }}</label>
-        <input v-model="item.REMARKS" :disabled="disabled" />
-      </div>
     </div>
   </div>
 </template>

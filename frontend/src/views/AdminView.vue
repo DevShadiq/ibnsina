@@ -646,8 +646,8 @@ onMounted(refresh);
         <section class="card">
           <h2>{{ t('Basic Information') }}</h2>
           <div class="grid">
-            <div class="field"><label>{{ t('Employee Name') }}</label><small class="certificate-hint">{{ t('Write as per SSC/Dakhil certificate') }}</small><input v-model="editEmployee.NAME" /></div>
-            <div class="field"><label>{{ t('Birth Date') }}</label><small class="certificate-hint">{{ t('Write as per SSC/Dakhil certificate') }}</small><DateInput v-model="editEmployee.BIRTHDATE" /></div>
+            <div class="field"><label>{{ t('Employee Name') }}</label><input v-model="editEmployee.NAME" /><small class="field-hint">{{ t('As per SSC/Dakhil certificate') }}</small></div>
+            <div class="field"><label>{{ t('Birth Date') }}</label><DateInput v-model="editEmployee.BIRTHDATE" /><small class="field-hint">{{ t('As per SSC/Dakhil certificate') }}</small></div>
             <div class="field"><label>{{ t('Blood Group') }}</label><input v-model="editEmployee.BLD_GROUP" /></div>
             <div class="field"><label>{{ t('Nationality') }}</label><input v-model="editEmployee.NATIONALITY" /></div>
             <div class="field"><label>{{ t('Height') }}</label><HeightInput v-model="editEmployee.HEIGHT" /></div>
@@ -707,7 +707,7 @@ onMounted(refresh);
         <section class="card">
           <h2>{{ t('Family Information') }}</h2>
           <div class="grid">
-            <div class="field"><label>{{ t('Father Name') }}</label><small class="certificate-hint">{{ t('Write as per SSC/Dakhil certificate') }}</small><input v-model="editEmployee.FATHER_NAME" /></div>
+            <div class="field"><label>{{ t('Father Name') }}</label><input v-model="editEmployee.FATHER_NAME" /><small class="field-hint">{{ t('As per SSC/Dakhil certificate') }}</small></div>
             <div class="field"><label>{{ t('Father Phone') }}</label><PhoneInput v-model="editEmployee.FATHER_PHONE" :required="false" /></div>
             <div class="field"><label>{{ t('Mother Name') }}</label><input v-model="editEmployee.MOTHER_NAME" /></div>
             <div class="field"><label>{{ t('Mother Phone') }}</label><PhoneInput v-model="editEmployee.MOTHER_PHONE" :required="false" /></div>

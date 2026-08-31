@@ -1,19 +1,18 @@
 export function blankChild() {
   return {
-    EMPCODE: '',
     FNAME: '',
     F_OCUP: '',
     F_ADD: '',
     PHONE: '',
-    CHILD_NOS: null,
     BIRTH_DATE: ''
   };
 }
 
 export function normalizeChildren(rows = []) {
-  return (Array.isArray(rows) ? rows : []).map((row, index) => ({
+  if (!Array.isArray(rows)) return [];
+  return rows.map(row => ({
     ...blankChild(),
     ...row,
-    CHILD_NOS: index + 1
+    BIRTH_DATE: row?.BIRTH_DATE ? String(row.BIRTH_DATE).slice(0, 10) : ''
   }));
 }

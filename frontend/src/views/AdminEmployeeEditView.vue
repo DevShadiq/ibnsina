@@ -134,8 +134,8 @@ onMounted(load);
       <section class="card">
         <h2>{{ t('Basic Information') }}</h2>
         <div class="grid">
-          <div class="field"><label>{{ t('Employee Name') }}</label><small class="certificate-hint">{{ t('Write as per SSC/Dakhil certificate') }}</small><input v-model="employee.NAME" /></div>
-          <div class="field"><label>{{ t('Birth Date') }}</label><small class="certificate-hint">{{ t('Write as per SSC/Dakhil certificate') }}</small><DateInput v-model="employee.BIRTHDATE" /></div>
+          <div class="field"><label>{{ t('Employee Name') }}</label><input v-model="employee.NAME" /><small class="field-hint">{{ t('As per SSC/Dakhil certificate') }}</small></div>
+          <div class="field"><label>{{ t('Birth Date') }}</label><DateInput v-model="employee.BIRTHDATE" /><small class="field-hint">{{ t('As per SSC/Dakhil certificate') }}</small></div>
           <div class="field"><label>{{ t('Blood Group') }}</label><select v-model="employee.BLD_GROUP"><option value="">Select</option><option v-for="group in bloodGroups" :key="group" :value="group">{{ group }}</option></select></div>
           <div class="field"><label>{{ t('Nationality') }}</label><input v-model="employee.NATIONALITY" /></div>
           <div class="field"><label>{{ t('Height') }}</label><HeightInput v-model="employee.HEIGHT" /></div>
@@ -177,7 +177,7 @@ onMounted(load);
 
       <section class="card">
         <h2>{{ t('Family Information') }}</h2>
-        <div class="grid"><div class="field"><label>{{ t('Father Name') }}</label><small class="certificate-hint">{{ t('Write as per SSC/Dakhil certificate') }}</small><input v-model="employee.FATHER_NAME" /></div><div class="field"><label>{{ t('Father Phone') }}</label><PhoneInput v-model="employee.FATHER_PHONE" :required="false" /></div><div class="field"><label>{{ t('Mother Name') }}</label><input v-model="employee.MOTHER_NAME" /></div><div class="field"><label>{{ t('Mother Phone') }}</label><PhoneInput v-model="employee.MOTHER_PHONE" :required="false" /></div></div>
+        <div class="grid"><div class="field"><label>{{ t('Father Name') }}</label><input v-model="employee.FATHER_NAME" /><small class="field-hint">{{ t('As per SSC/Dakhil certificate') }}</small></div><div class="field"><label>{{ t('Father Phone') }}</label><PhoneInput v-model="employee.FATHER_PHONE" :required="false" /></div><div class="field"><label>{{ t('Mother Name') }}</label><input v-model="employee.MOTHER_NAME" /></div><div class="field"><label>{{ t('Mother Phone') }}</label><PhoneInput v-model="employee.MOTHER_PHONE" :required="false" /></div></div>
         <ChildInformation v-if="employee.MARITAL_STATUS === 'M'" v-model="children" />
       </section>
 
