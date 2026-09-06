@@ -358,7 +358,8 @@ router.delete('/users/:userId', requireSuperAdmin, async (req, res, next) => {
 router.get('/batches', async (req, res, next) => {
   try {
     const [rows] = await pool.query(
-      `SELECT *
+      `SELECT BATCH_NO AS "BATCH_NO", STATUS, STARTED_AT, CLOSED_AT,
+              CREATED_BY, CREATED_AT, UPDATED_AT
          FROM hr_batch_control
         ORDER BY CREATED_AT DESC`
     );
@@ -474,7 +475,9 @@ router.put('/batches/:batchNo', requireSuperAdmin, async (req, res, next) => {
   try {
     await conn.beginTransaction();
     const [batches] = await conn.query(
-      `SELECT * FROM hr_batch_control FOR UPDATE`
+      `SELECT BATCH_NO AS "BATCH_NO", STATUS, STARTED_AT, CLOSED_AT,
+              CREATED_BY, CREATED_AT, UPDATED_AT
+         FROM hr_batch_control FOR UPDATE`
     );
     const existing = batches.find(row => row.BATCH_NO === currentBatchNo);
     if (!existing) {
@@ -591,11 +594,11 @@ router.get('/employees', async (req, res, next) => {
     if (search) {
       const searchValue = `%${search}%`;
       conditions.push(`(
-        e.MERITLIST_ID LIKE ? OR
-        e.CLASS_ID LIKE ? OR
-        e.IPI LIKE ? OR
-        e.NAME LIKE ? OR
-        e.PHONE LIKE ?
+        e.MERITLIST_ID ILIKE ? OR
+        e.CLASS_ID ILIKE ? OR
+        e.IPI ILIKE ? OR
+        e.NAME ILIKE ? OR
+        e.PHONE ILIKE ?
       )`);
       params.push(searchValue, searchValue, searchValue, searchValue, searchValue);
     }
@@ -991,7 +994,7 @@ router.put('/employees/:empEntryId', async (req, res, next) => {
     await conn.rollback();
     if (e.code === 'ER_DUP_ENTRY') {
       e.status = 409;
-      e.message = String(e.message).includes('UK_EMP_IPI')
+      e.message = /uk_emp_ipi/i.test(String(e.sqlMessage || e.message || ''))
         ? 'This IPI is already assigned to another employee.'
         : `Merit List ID and Class ID are already used by another employee in batch ${batchNo}.`;
     }
@@ -1228,7 +1231,7 @@ router.post('/employees/:empEntryId/correction-access', async (req, res, next) =
       await conn.execute(
         `UPDATE hr_update_request
             SET STATUS = 'APPROVED', APPROVED_AT = NOW(),
-                APPROVED_UNTIL = DATE_ADD(NOW(), INTERVAL 24 HOUR),
+                APPROVED_UNTIL = NOW() + INTERVAL '24 hours',
                 APPROVED_BY = ?, ADMIN_REMARKS = ?, UPDATED_AT = NOW()
           WHERE REQUEST_ID = ?`,
         [req.admin.username, note, pending[0].REQUEST_ID]
@@ -1240,7 +1243,7 @@ router.post('/employees/:empEntryId/correction-access', async (req, res, next) =
            REQUEST_NOTE, REQUESTED_AT, STATUS, APPROVED_AT, APPROVED_UNTIL,
            APPROVED_BY, ADMIN_REMARKS)
          VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), 'APPROVED', NOW(),
-                 DATE_ADD(NOW(), INTERVAL 24 HOUR), ?, ?)`,
+                 NOW() + INTERVAL '24 hours', ?, ?)`,
         [
           uuidv4(), employee.EMP_ENTRY_ID, employee.IPI || null,
           employee.MERITLIST_ID, employee.CLASS_ID, employee.batch_no,
@@ -1281,7 +1284,7 @@ router.get('/update-requests', async (req, res, next) => {
     }
 
     const [rows] = await pool.execute(
-      `SELECT r.*, e.NAME, e.PHONE
+      `SELECT r.*, r.BATCH_NO AS "BATCH_NO", e.NAME, e.PHONE
          FROM hr_update_request r
          JOIN up_emp e
            ON e.EMP_ENTRY_ID = r.EMP_ENTRY_ID
@@ -1313,7 +1316,7 @@ router.patch('/update-requests/:requestId', async (req, res, next) => {
         `UPDATE hr_update_request
             SET STATUS = 'APPROVED',
                 APPROVED_AT = NOW(),
-                APPROVED_UNTIL = DATE_ADD(NOW(), INTERVAL 24 HOUR),
+                APPROVED_UNTIL = NOW() + INTERVAL '24 hours',
                 APPROVED_BY = ?,
                 ADMIN_REMARKS = ?,
                 UPDATED_AT = NOW()

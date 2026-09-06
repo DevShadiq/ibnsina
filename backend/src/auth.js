@@ -1,6 +1,12 @@
 import jwt from 'jsonwebtoken';
 import { pool } from './db.js';
 
+const jwtSecret = String(process.env.JWT_SECRET || '').trim();
+
+if (!jwtSecret) {
+  throw new Error('Missing JWT_SECRET. Set a long random value in the backend environment.');
+}
+
 export function signAdmin(admin) {
   return jwt.sign(
     {
@@ -9,7 +15,7 @@ export function signAdmin(admin) {
       name: admin.DISPLAY_NAME,
       userType: admin.USER_TYPE
     },
-    process.env.JWT_SECRET,
+    jwtSecret,
     { expiresIn: '8h' }
   );
 }
@@ -20,7 +26,7 @@ export async function requireAdmin(req, res, next) {
   if (!token) return res.status(401).json({ message: 'Admin login required.' });
 
   try {
-    const payload = jwt.verify(token, process.env.JWT_SECRET);
+    const payload = jwt.verify(token, jwtSecret);
     const [rows] = await pool.execute(
       `SELECT USER_ID, USERNAME, DISPLAY_NAME, USER_TYPE
          FROM admin_user

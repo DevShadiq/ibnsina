@@ -183,6 +183,11 @@ Deploy two Vercel projects from this repository:
 | API | `backend` | `NODE_ENV=production`, `DATABASE_URL` (pooled Neon URL), `DB_POOL_MAX=3`, `JWT_SECRET`, `FRONTEND_ORIGIN=https://YOUR-FRONTEND.vercel.app` |
 | Web | `frontend` | `VITE_API_URL=https://YOUR-BACKEND.vercel.app/api` |
 
+The API root contains `app.js`, which exports the Express application for
+Vercel's zero-configuration Express runtime. Do not set a backend build command
+or output directory. The web project should use the Vite framework preset,
+`npm run build`, and the default `dist` output directory.
+
 Redeploy each project whenever its environment variables change. Do not use
 `localhost` in a Vercel environment variable. `FRONTEND_ORIGIN` must be the
 exact frontend origin. A trailing slash is accepted, but this is the preferred
@@ -190,7 +195,9 @@ form: `https://YOUR-FRONTEND.vercel.app`.
 
 Use the pooled Neon hostname (it contains `-pooler`) and retain
 `sslmode=require` in the connection URL. The backend also accepts
-`POSTGRES_URL` when the Vercel Neon integration supplies that name.
+`POSTGRES_URL` when the Vercel Neon integration supplies that name. Add the
+database and authentication variables to Preview as well as Production if you
+want backend preview deployments to start successfully.
 
 To create the initial admin against the production database, download the API
 project's Vercel Production variables locally, run the command below from
@@ -299,50 +306,20 @@ Verify the deployment with `https://ibnsina.shadiqur.bd`,
 `https://ibnsina.shadiqur.bd/admin`, and
 `https://ibnsina.shadiqur.bd/health`.
 
-## Existing database: education row numbering
+## Existing PostgreSQL database
 
-Education `SLNO` is numbered separately for each employee: every employee's
-first education row is `1`, then `2`, `3`, and so on. For an existing
-database, run `database/migration_per_employee_education_slno.sql` once before
-deploying this change.
+The main schema already includes per-employee education numbering,
+batch-scoped employee identity, Admin/Super Admin roles, public drafts, approval
+states, update requests, and child information. If the Neon database was made
+from an earlier version of this PostgreSQL schema that does not have
+`hr_empfamilydet`, run `database/migration_add_employee_children.sql` once. The
+migration is also safe when the table already exists and adds the stable
+`family_id` used by the current API.
 
-## Existing database: batch-scoped employee identity
-
-Merit List ID and Class ID are unique together within a batch. The same pair
-may be reused in a different batch. For an existing database, run
-`database/migration_batch_employee_identity.sql` once before deploying the
-matching backend.
-
-## Existing database: Admin and Super Admin user types
-
-Super Admin accounts can create, edit, activate/deactivate, reset passwords,
-and delete administrator accounts. They can also rename batches, change their
-status, permanently delete empty batches, and delete employee records. Admin
-accounts retain employee, batch, approval,
-request, and export access but cannot manage other users or perform permanent
-deletes. Every logged-in Admin or Super Admin can change their own password by
-confirming their current password.
-
-For an existing database, run
-`database/migration_add_admin_user_types.sql` once before deploying this change.
-The migration promotes existing administrator accounts to Super Admin so user
-management remains accessible. New command-line accounts default to Super Admin;
-an explicit type can be supplied as the final argument:
+New command-line accounts default to Super Admin; an explicit role can be
+supplied as the final argument:
 
 ```bash
 npm run admin:create -- username password "Display Name" ADMIN
 npm run admin:create -- username password "Display Name" SUPER_ADMIN
 ```
-
-## Existing database: public draft saving
-
-New-employee forms can be saved as incomplete drafts and submitted later.
-For an existing database, run `database/migration_allow_employee_drafts.sql`
-once before deploying the matching backend.
-
-## Existing database: employee child information
-
-Child information is optional and is available when an employee's marital
-status is Married. For an existing database, run
-`database/migration_add_employee_children.sql` once before deploying the
-matching backend and frontend.

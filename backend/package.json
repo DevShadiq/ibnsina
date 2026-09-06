@@ -9,7 +9,11 @@
     "admin:create": "node src/create-admin.js",
     "db:check": "node src/check-db.js"
   },
+  "engines": {
+    "node": ">=20.19.0"
+  },
   "dependencies": {
+    "@vercel/functions": "^3.9.5",
     "@vercel/speed-insights": "^2.0.0",
     "bcryptjs": "^3.0.2",
     "cors": "^2.8.5",

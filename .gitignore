@@ -6,7 +6,6 @@ backend/node_modules/
 # Environment / Secrets
 .env
 .env.*
-!.env.example
 frontend/.env
 backend/.env
 backend/ca.pem
@@ -35,6 +34,7 @@ tmp/
 temp/
 .vercel
 .env*
+!**/.env.example
 
 # Local production dump (contains employee data and password hashes)
 database/employee_portal_mysql.sql

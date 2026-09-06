@@ -323,7 +323,8 @@ router.post('/employee/new-entry', async (req, res, next) => {
     const [result] = await conn.execute(
       `INSERT INTO up_emp
        (MERITLIST_ID, CLASS_ID, NATIONALITY, batch_no, APPROVAL_STATUS, CREATED_AT)
-       VALUES (?, ?, 'Bangladeshi', ?, 'DRAFT', NOW())`,
+       VALUES (?, ?, 'Bangladeshi', ?, 'DRAFT', NOW())
+       RETURNING EMP_ENTRY_ID`,
       [meritlistId, classId, active.BATCH_NO]
     );
 
@@ -509,7 +510,8 @@ router.post('/employee/save', async (req, res, next) => {
       const [result] = await conn.execute(
         `INSERT INTO up_emp
          (${insertCols.join(',')}, CREATED_AT)
-         VALUES (${insertCols.map(() => '?').join(',')}, NOW())`,
+         VALUES (${insertCols.map(() => '?').join(',')}, NOW())
+         RETURNING EMP_ENTRY_ID`,
         values
       );
 
