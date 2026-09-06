@@ -1,6 +1,6 @@
 export async function getActiveBatch(conn) {
   const [rows] = await conn.query(
-    `SELECT BATCH_NO AS "BATCH_NO", STATUS, STARTED_AT
+    `SELECT BATCH_NO, STATUS, STARTED_AT
        FROM hr_batch_control
       WHERE STATUS = 'ACTIVE'
       ORDER BY STARTED_AT DESC, UPDATED_AT DESC`

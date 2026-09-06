@@ -9,6 +9,9 @@ export function normalizeAndValidateEmployeeNids(employee, { required = true } =
 
     if (!value) {
       employee[field] = null;
+      if (required) {
+        throw Object.assign(new Error(`${label} is required.`), { status: 400 });
+      }
       continue;
     }
 

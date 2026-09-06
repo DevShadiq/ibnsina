@@ -71,7 +71,6 @@ export function validateAndNormalizeEducation(input, { required = true } = {}) {
     const active = rowRequired || hasEnteredDetails(row);
 
     if (!active) {
-      if (!required) normalized.push(row);
       continue;
     }
 
@@ -96,7 +95,7 @@ export function validateAndNormalizeEducation(input, { required = true } = {}) {
 
     if (row.PASSYEAR && !/^\d{4}$/.test(String(row.PASSYEAR))) {
       throw Object.assign(
-        new Error(`${EDUCATION_LEVELS[index]}: Pass Year must contain exactly 4 numeric digits.`),
+        new Error(`${EDUCATION_LEVELS[index]}: Pass Year must contain exactly 4 digits.`),
         { status: 400 }
       );
     }
@@ -126,7 +125,7 @@ export function validateAndNormalizeEducation(input, { required = true } = {}) {
       row.EXAMGROUP = null;
     }
 
-    normalized.push(row);
+    normalized.push({ ...row, SLNO: index + 1 });
   }
 
   return normalized;

@@ -6,9 +6,10 @@ import { pool } from '../db.js';
 import { requireAdmin, requireSuperAdmin, signAdmin } from '../auth.js';
 import { normalizeAndValidateEmployeePhones } from '../utils/phones.js';
 import { validateAndNormalizeEducation } from '../utils/education.js';
-import { validateAndNormalizeChildren } from '../utils/children.js';
 import { normalizeAndValidateMeasurements } from '../utils/measurements.js';
 import { normalizeAndValidateEmployeeNids } from '../utils/nid.js';
+import { validateAndNormalizeChildren } from '../utils/children.js';
+import { validateRequiredEmployeeFields } from '../utils/employee-required.js';
 
 const router = Router();
 
@@ -34,9 +35,7 @@ function cleanObj(input, columns) {
 }
 
 function validateEmployee(employee, { required = false } = {}) {
-  if (required && !employee.NAME) {
-    throw Object.assign(new Error('Employee name is required.'), { status: 400 });
-  }
+  if (required) validateRequiredEmployeeFields(employee);
 
   const allowed = {
     GENDER: ['', 'M', 'F'],
@@ -359,8 +358,7 @@ router.delete('/users/:userId', requireSuperAdmin, async (req, res, next) => {
 router.get('/batches', async (req, res, next) => {
   try {
     const [rows] = await pool.query(
-      `SELECT BATCH_NO AS "BATCH_NO", STATUS, STARTED_AT, CLOSED_AT,
-              CREATED_BY, CREATED_AT, UPDATED_AT
+      `SELECT *
          FROM hr_batch_control
         ORDER BY CREATED_AT DESC`
     );
@@ -476,9 +474,7 @@ router.put('/batches/:batchNo', requireSuperAdmin, async (req, res, next) => {
   try {
     await conn.beginTransaction();
     const [batches] = await conn.query(
-      `SELECT BATCH_NO AS "BATCH_NO", STATUS, STARTED_AT, CLOSED_AT,
-              CREATED_BY, CREATED_AT, UPDATED_AT
-         FROM hr_batch_control FOR UPDATE`
+      `SELECT * FROM hr_batch_control FOR UPDATE`
     );
     const existing = batches.find(row => row.BATCH_NO === currentBatchNo);
     if (!existing) {
@@ -595,11 +591,11 @@ router.get('/employees', async (req, res, next) => {
     if (search) {
       const searchValue = `%${search}%`;
       conditions.push(`(
-        e.MERITLIST_ID ILIKE ? OR
-        e.CLASS_ID ILIKE ? OR
-        e.IPI ILIKE ? OR
-        e.NAME ILIKE ? OR
-        e.PHONE ILIKE ?
+        e.MERITLIST_ID LIKE ? OR
+        e.CLASS_ID LIKE ? OR
+        e.IPI LIKE ? OR
+        e.NAME LIKE ? OR
+        e.PHONE LIKE ?
       )`);
       params.push(searchValue, searchValue, searchValue, searchValue, searchValue);
     }
@@ -632,6 +628,121 @@ router.get('/employees', async (req, res, next) => {
   }
 });
 
+/**
+ * Approve several employee submissions in one request. Selected approval may
+ * include rejected records; approve-all intentionally targets PENDING only.
+ * Invalid/incomplete submissions are reported and left unchanged so one bad
+ * record does not prevent the remaining valid submissions from being approved.
+ */
+router.patch('/employees/approval/bulk', async (req, res, next) => {
+  const approveAllSubmitted = req.body?.approveAllSubmitted === true;
+  const requestedIds = Array.isArray(req.body?.employeeIds)
+    ? [...new Set(req.body.employeeIds.map(Number))]
+    : [];
+
+  if (!approveAllSubmitted) {
+    if (!requestedIds.length) {
+      return res.status(400).json({ message: 'Select at least one employee to approve.' });
+    }
+
+    if (requestedIds.length > 500) {
+      return res.status(400).json({ message: 'A maximum of 500 employees can be approved at one time.' });
+    }
+
+    if (requestedIds.some(id => !Number.isInteger(id) || id <= 0)) {
+      return res.status(400).json({ message: 'One or more employee entry IDs are invalid.' });
+    }
+  }
+
+  const conn = await pool.getConnection();
+
+  try {
+    await conn.beginTransaction();
+
+    let employees;
+    if (approveAllSubmitted) {
+      [employees] = await conn.execute(
+        `SELECT *
+           FROM up_emp
+          WHERE APPROVAL_STATUS = 'PENDING'
+          ORDER BY EMP_ENTRY_ID
+          FOR UPDATE`
+      );
+    } else {
+      const placeholders = requestedIds.map(() => '?').join(', ');
+      [employees] = await conn.execute(
+        `SELECT *
+           FROM up_emp
+          WHERE EMP_ENTRY_ID IN (${placeholders})
+            AND APPROVAL_STATUS IN ('PENDING', 'REJECTED')
+          ORDER BY EMP_ENTRY_ID
+          FOR UPDATE`,
+        requestedIds
+      );
+    }
+
+    const approvedIds = [];
+    const failures = [];
+
+    for (const employee of employees) {
+      try {
+        const [education] = await conn.execute(
+          `SELECT EXAMNAME, EXAMGROUP, BOARD, CLAS, PASSYEAR,
+                  REMARKS, INSTITUTE, SUBJECT_NAME
+             FROM hr_empexamdet
+            WHERE EMP_ENTRY_ID = ?
+            ORDER BY SLNO`,
+          [employee.EMP_ENTRY_ID]
+        );
+
+        validateEmployee(employee, { required: true });
+        validateAndNormalizeEducation(education, { required: true });
+        approvedIds.push(employee.EMP_ENTRY_ID);
+      } catch (error) {
+        failures.push({
+          employeeId: employee.EMP_ENTRY_ID,
+          name: employee.NAME || '',
+          message: error.message || 'Employee information is incomplete.'
+        });
+      }
+    }
+
+    if (approvedIds.length) {
+      const placeholders = approvedIds.map(() => '?').join(', ');
+      await conn.execute(
+        `UPDATE up_emp
+            SET APPROVAL_STATUS = 'APPROVED',
+                APPROVED_BY = ?,
+                APPROVED_AT = NOW(),
+                UPDATED_AT = NOW()
+          WHERE EMP_ENTRY_ID IN (${placeholders})`,
+        [req.admin.username, ...approvedIds]
+      );
+    }
+
+    const skippedCount = approveAllSubmitted
+      ? 0
+      : requestedIds.length - employees.length;
+
+    await conn.commit();
+    res.json({
+      ok: true,
+      approvedCount: approvedIds.length,
+      failedCount: failures.length,
+      skippedCount,
+      failures,
+      message: approvedIds.length
+        ? `${approvedIds.length} employee${approvedIds.length === 1 ? '' : 's'} approved.`
+        : 'No employees were approved.'
+    });
+  } catch (e) {
+    await conn.rollback();
+    next(e);
+  } finally {
+    conn.release();
+  }
+});
+
 router.get('/employees/:empEntryId', async (req, res, next) => {
   const empEntryId = Number(req.params.empEntryId);
 
@@ -659,11 +770,11 @@ router.get('/employees/:empEntryId', async (req, res, next) => {
     );
 
     const [children] = await pool.execute(
-      `SELECT EMP_ENTRY_ID, EMPCODE, FNAME, F_OCUP, F_ADD, PHONE,
-              CHILD_NOS, BIRTH_DATE
+      `SELECT FAMILY_ID, EMP_ENTRY_ID, EMPCODE, FNAME, F_OCUP, F_ADD,
+              PHONE, CHILD_NOS, BIRTH_DATE
          FROM hr_empfamilydet
         WHERE EMP_ENTRY_ID = ?
-        ORDER BY CHILD_NOS`,
+        ORDER BY CHILD_NOS, FAMILY_ID`,
       [empEntryId]
     );
 
@@ -732,14 +843,9 @@ router.put('/employees/:empEntryId', async (req, res, next) => {
   }
 
   let normalizedEducation;
-  try {
-    normalizedEducation = validateAndNormalizeEducation(education, { required: requireComplete });
-  } catch (e) {
-    return next(e);
-  }
-
   let normalizedChildren;
   try {
+    normalizedEducation = validateAndNormalizeEducation(education, { required: requireComplete });
     normalizedChildren = validateAndNormalizeChildren(children, {
       married: employee.MARITAL_STATUS === 'M'
     });
@@ -834,6 +940,11 @@ router.put('/employees/:empEntryId', async (req, res, next) => {
       [empEntryId]
     );
 
+    await conn.execute(
+      `DELETE FROM hr_empfamilydet WHERE EMP_ENTRY_ID = ?`,
+      [empEntryId]
+    );
+
     for (const [index, row] of normalizedEducation.entries()) {
       await conn.execute(
         `INSERT INTO hr_empexamdet
@@ -842,7 +953,7 @@ router.put('/employees/:empEntryId', async (req, res, next) => {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           empEntryId,
-          index + 1,
+          row.SLNO || index + 1,
           ipi || null,
           row.EXAMNAME || null,
           row.EXAMGROUP || null,
@@ -856,12 +967,7 @@ router.put('/employees/:empEntryId', async (req, res, next) => {
       );
     }
 
-    await conn.execute(
-      `DELETE FROM hr_empfamilydet WHERE EMP_ENTRY_ID = ?`,
-      [empEntryId]
-    );
-
-    for (const [index, child] of normalizedChildren.entries()) {
+    for (const child of normalizedChildren) {
       await conn.execute(
         `INSERT INTO hr_empfamilydet
          (EMP_ENTRY_ID, EMPCODE, FNAME, F_OCUP, F_ADD, PHONE, CHILD_NOS, BIRTH_DATE)
@@ -873,7 +979,7 @@ router.put('/employees/:empEntryId', async (req, res, next) => {
           child.F_OCUP || null,
           child.F_ADD || null,
           child.PHONE || null,
-          index + 1,
+          child.CHILD_NOS,
           child.BIRTH_DATE || null
         ]
       );
@@ -966,7 +1072,7 @@ router.patch('/employees/:empEntryId/approval', async (req, res, next) => {
 
 /**
  * Admin assigns or changes IPI.
- * Education EMPCODE is synchronized in the same transaction.
+ * Education and child EMPCODE values are synchronized in the same transaction.
  */
 router.patch('/employees/:empEntryId/ipi', async (req, res, next) => {
   const empEntryId = Number(req.params.empEntryId);
@@ -984,13 +1090,17 @@ router.patch('/employees/:empEntryId/ipi', async (req, res, next) => {
     });
   }
 
+  if (ipi.length > 50) {
+    return res.status(400).json({ message: 'IPI cannot exceed 50 characters.' });
+  }
+
   const conn = await pool.getConnection();
 
   try {
     await conn.beginTransaction();
 
     const [employees] = await conn.execute(
-      `SELECT EMP_ENTRY_ID, MERITLIST_ID, CLASS_ID, IPI
+      `SELECT EMP_ENTRY_ID, MERITLIST_ID, CLASS_ID, IPI, APPROVAL_STATUS
          FROM up_emp
         WHERE EMP_ENTRY_ID = ?
         FOR UPDATE`,
@@ -1001,6 +1111,13 @@ router.patch('/employees/:empEntryId/ipi', async (req, res, next) => {
       throw Object.assign(
         new Error('Employee record not found.'),
         { status: 404 }
+      );
+    }
+
+    if (employees[0].APPROVAL_STATUS !== 'APPROVED') {
+      throw Object.assign(
+        new Error('IPI can only be assigned after the employee is approved.'),
+        { status: 409 }
       );
     }
 
@@ -1111,7 +1228,7 @@ router.post('/employees/:empEntryId/correction-access', async (req, res, next) =
       await conn.execute(
         `UPDATE hr_update_request
             SET STATUS = 'APPROVED', APPROVED_AT = NOW(),
-                APPROVED_UNTIL = NOW() + INTERVAL '24 hours',
+                APPROVED_UNTIL = DATE_ADD(NOW(), INTERVAL 24 HOUR),
                 APPROVED_BY = ?, ADMIN_REMARKS = ?, UPDATED_AT = NOW()
           WHERE REQUEST_ID = ?`,
         [req.admin.username, note, pending[0].REQUEST_ID]
@@ -1123,7 +1240,7 @@ router.post('/employees/:empEntryId/correction-access', async (req, res, next) =
            REQUEST_NOTE, REQUESTED_AT, STATUS, APPROVED_AT, APPROVED_UNTIL,
            APPROVED_BY, ADMIN_REMARKS)
          VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), 'APPROVED', NOW(),
-                 NOW() + INTERVAL '24 hours', ?, ?)`,
+                 DATE_ADD(NOW(), INTERVAL 24 HOUR), ?, ?)`,
         [
           uuidv4(), employee.EMP_ENTRY_ID, employee.IPI || null,
           employee.MERITLIST_ID, employee.CLASS_ID, employee.batch_no,
@@ -1164,7 +1281,7 @@ router.get('/update-requests', async (req, res, next) => {
     }
 
     const [rows] = await pool.execute(
-      `SELECT r.*, r.BATCH_NO AS "BATCH_NO", e.NAME, e.PHONE
+      `SELECT r.*, e.NAME, e.PHONE
          FROM hr_update_request r
          JOIN up_emp e
            ON e.EMP_ENTRY_ID = r.EMP_ENTRY_ID
@@ -1196,7 +1313,7 @@ router.patch('/update-requests/:requestId', async (req, res, next) => {
         `UPDATE hr_update_request
             SET STATUS = 'APPROVED',
                 APPROVED_AT = NOW(),
-                APPROVED_UNTIL = NOW() + INTERVAL '24 hours',
+                APPROVED_UNTIL = DATE_ADD(NOW(), INTERVAL 24 HOUR),
                 APPROVED_BY = ?,
                 ADMIN_REMARKS = ?,
                 UPDATED_AT = NOW()
@@ -1249,6 +1366,8 @@ router.get('/export/:batchNo', async (req, res, next) => {
     const [employees] = await pool.execute(
       `SELECT
           IPI,
+          MERITLIST_ID,
+          CLASS_ID,
           NAME,
           batch_no,
           BIRTHDATE,
@@ -1322,25 +1441,25 @@ router.get('/export/:batchNo', async (req, res, next) => {
 
     const [children] = await pool.execute(
       `SELECT
-          d.EMPCODE,
-          d.FNAME,
-          d.F_OCUP,
-          d.F_ADD,
-          d.PHONE,
-          d.CHILD_NOS,
-          d.BIRTH_DATE
-        FROM hr_empfamilydet d
+          f.EMPCODE,
+          f.FNAME,
+          f.F_OCUP,
+          f.F_ADD,
+          f.PHONE,
+          f.CHILD_NOS,
+          f.BIRTH_DATE
+        FROM hr_empfamilydet f
         JOIN up_emp e
-          ON e.EMP_ENTRY_ID = d.EMP_ENTRY_ID
+          ON e.EMP_ENTRY_ID = f.EMP_ENTRY_ID
        WHERE e.batch_no = ?
-       ORDER BY e.MERITLIST_ID, e.CLASS_ID, d.CHILD_NOS`,
+       ORDER BY e.MERITLIST_ID, e.CLASS_ID, f.CHILD_NOS`,
       [batchNo]
     );
 
     const workbook = new ExcelJS.Workbook();
     const empSheet = workbook.addWorksheet('up_emp');
     const examSheet = workbook.addWorksheet('hr_empexamdet');
-    const familySheet = workbook.addWorksheet('hr_empfamilydet');
+    const familySheet = workbook.addWorksheet('HR_EMPFAMILYDET');
 
     if (employees.length) {
       empSheet.columns = Object.keys(employees[0]).map(k => ({
@@ -1370,7 +1489,7 @@ router.get('/export/:batchNo', async (req, res, next) => {
         key: k,
         width: 18
       }));
-      children.forEach(r => familySheet.addRow(r));
+      children.forEach(row => familySheet.addRow(row));
     } else {
       familySheet.addRow(['No data']);
     }

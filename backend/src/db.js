@@ -1,209 +1,32 @@
-import pg from 'pg';
+import mysql from 'mysql2/promise';
+import fs from 'node:fs';
 import 'dotenv/config';
 
-const { Pool, types } = pg;
+const sslCaFromEnvironment = String(process.env.DB_SSL_CA || '').replace(/\\n/g, '\n');
+const sslCaPath = String(process.env.DB_SSL_CA_PATH || '').trim();
+const sslCa = sslCaFromEnvironment || (sslCaPath
+  ? fs.readFileSync(sslCaPath, 'utf8')
+  : undefined);
 
-// Keep the API's existing JSON contract: MySQL returned BIGINT values as
-// numbers and date/time values as strings.
-types.setTypeParser(20, value => {
-  const parsed = Number(value);
-  return Number.isSafeInteger(parsed) ? parsed : value;
+const ssl = String(process.env.DB_SSL).toLowerCase() === 'true'
+  ? {
+      minVersion: 'TLSv1.2',
+      rejectUnauthorized: true,
+      ...(sslCa ? { ca: sslCa } : {})
+    }
+  : undefined;
+
+export const pool = mysql.createPool({
+  host: process.env.DB_HOST,
+  port: Number(process.env.DB_PORT || 3306),
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
+  ssl,
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0,
+  enableKeepAlive: true,
+  keepAliveInitialDelay: 0,
+  dateStrings: true
 });
-types.setTypeParser(1082, value => value); // date
-types.setTypeParser(1114, value => value); // timestamp
-types.setTypeParser(1184, value => value); // timestamptz
-
-const connectionString = String(
-  process.env.DATABASE_URL || process.env.POSTGRES_URL || ''
-).trim();
-
-if (!connectionString) {
-  throw new Error(
-    'Missing DATABASE_URL. Set it to the pooled connection string from your Neon project.'
-  );
-}
-
-const poolOptions = {
-  connectionString,
-  max: Number(process.env.DB_POOL_MAX || (process.env.VERCEL ? 3 : 10)),
-  idleTimeoutMillis: 30_000,
-  connectionTimeoutMillis: 10_000,
-  allowExitOnIdle: true,
-  options: '-c timezone=UTC'
-};
-
-const pgPool = new Pool(poolOptions);
-
-pgPool.on('error', error => {
-  console.error('Unexpected PostgreSQL pool error:', error);
-});
-
-export function toPostgresPlaceholders(sql) {
-  const source = String(sql);
-  let index = 0;
-  let output = '';
-  let state = 'normal';
-  let dollarQuote = '';
-
-  for (let i = 0; i < source.length; i += 1) {
-    const char = source[i];
-    const next = source[i + 1];
-
-    if (state === 'single-quote') {
-      output += char;
-
-      if (char === "'" && next === "'") {
-        output += next;
-        i += 1;
-      } else if (char === "'") {
-        state = 'normal';
-      }
-      continue;
-    }
-
-    if (state === 'double-quote') {
-      output += char;
-
-      if (char === '"' && next === '"') {
-        output += next;
-        i += 1;
-      } else if (char === '"') {
-        state = 'normal';
-      }
-      continue;
-    }
-
-    if (state === 'line-comment') {
-      output += char;
-      if (char === '\n') state = 'normal';
-      continue;
-    }
-
-    if (state === 'block-comment') {
-      output += char;
-      if (char === '*' && next === '/') {
-        output += next;
-        i += 1;
-        state = 'normal';
-      }
-      continue;
-    }
-
-    if (state === 'dollar-quote') {
-      if (source.startsWith(dollarQuote, i)) {
-        output += dollarQuote;
-        i += dollarQuote.length - 1;
-        state = 'normal';
-      } else {
-        output += char;
-      }
-      continue;
-    }
-
-    if (char === "'") {
-      output += char;
-      state = 'single-quote';
-    } else if (char === '"') {
-      output += char;
-      state = 'double-quote';
-    } else if (char === '-' && next === '-') {
-      output += char + next;
-      i += 1;
-      state = 'line-comment';
-    } else if (char === '/' && next === '*') {
-      output += char + next;
-      i += 1;
-      state = 'block-comment';
-    } else if (char === '$') {
-      const match = source.slice(i).match(/^\$[A-Za-z_][A-Za-z0-9_]*\$|^\$\$/);
-
-      if (match) {
-        dollarQuote = match[0];
-        output += dollarQuote;
-        i += dollarQuote.length - 1;
-        state = 'dollar-quote';
-      } else {
-        output += char;
-      }
-    } else if (char === '?') {
-      output += `$${++index}`;
-    } else {
-      output += char;
-    }
-  }
-
-  return output;
-}
-
-function normalizeRow(row) {
-  const normalized = {};
-  const hasExplicitUpperBatchNo = Object.hasOwn(row, 'BATCH_NO');
-
-  for (const [key, value] of Object.entries(row)) {
-    if (key === 'batch_no' && hasExplicitUpperBatchNo) continue;
-
-    // The legacy MySQL schema intentionally exposed this one column and the
-    // COUNT alias in lowercase. The frontend relies on that response shape.
-    const outputKey = key === 'batch_no' || key === 'total'
-      ? key
-      : key.toUpperCase();
-    normalized[outputKey] = value;
-  }
-
-  return normalized;
-}
-
-function mapPostgresError(error) {
-  error.pgCode = error.code;
-
-  if (error.code === '23505') error.code = 'ER_DUP_ENTRY';
-  if (error.code === '23503') error.code = 'ER_ROW_IS_REFERENCED_2';
-
-  return error;
-}
-
-async function execute(client, sql, params = []) {
-  try {
-    const result = await client.query(toPostgresPlaceholders(sql), params);
-
-    if (result.command === 'SELECT') {
-      return [result.rows.map(normalizeRow), result.fields];
-    }
-
-    const returnedRow = result.rows[0] ? normalizeRow(result.rows[0]) : null;
-    const insertId = returnedRow
-      ? returnedRow.EMP_ENTRY_ID ?? returnedRow.USER_ID ?? Object.values(returnedRow)[0]
-      : undefined;
-
-    return [{
-      affectedRows: result.rowCount ?? 0,
-      insertId
-    }, result.fields];
-  } catch (error) {
-    throw mapPostgresError(error);
-  }
-}
-
-function wrapClient(client) {
-  return {
-    query: (sql, params) => execute(client, sql, params),
-    execute: (sql, params) => execute(client, sql, params),
-    beginTransaction: () => client.query('BEGIN'),
-    commit: () => client.query('COMMIT'),
-    rollback: () => client.query('ROLLBACK'),
-    release: () => client.release()
-  };
-}
-
-export const pool = {
-  query: (sql, params) => execute(pgPool, sql, params),
-  execute: (sql, params) => execute(pgPool, sql, params),
-  async getConnection() {
-    try {
-      return wrapClient(await pgPool.connect());
-    } catch (error) {
-      throw mapPostgresError(error);
-    }
-  },
-  end: () => pgPool.end()
-};

@@ -38,8 +38,8 @@ function removeChild(index) {
 
     <div class="grid">
       <div class="field">
-        <label>{{ t('Child Name') }}</label>
-        <input v-model="child.FNAME" maxlength="100" :disabled="disabled" />
+        <label>{{ t('Child Name') }}<span class="required-mark"> *</span></label>
+        <input v-model="child.FNAME" maxlength="100" :disabled="disabled" required />
       </div>
       <div class="field">
         <label>{{ t('Education Qualification') }}</label>

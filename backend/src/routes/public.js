@@ -8,9 +8,10 @@ import {
   normalizePhone
 } from '../utils/phones.js';
 import { validateAndNormalizeEducation } from '../utils/education.js';
-import { validateAndNormalizeChildren } from '../utils/children.js';
 import { normalizeAndValidateMeasurements } from '../utils/measurements.js';
 import { normalizeAndValidateEmployeeNids } from '../utils/nid.js';
+import { validateAndNormalizeChildren } from '../utils/children.js';
+import { validateRequiredEmployeeFields } from '../utils/employee-required.js';
 
 const router = Router();
 
@@ -42,8 +43,8 @@ function cleanObj(input, columns) {
 }
 
 function validateEmployee(e, { required = true } = {}) {
-  if (required && !e.NAME) {
-    throw Object.assign(new Error('Employee name is required.'), { status: 400 });
+  if (required) {
+    validateRequiredEmployeeFields(e);
   }
 
   for (const key of Object.keys(allowed)) {
@@ -93,6 +94,35 @@ async function getEmployeeByIdentity(conn, meritlistId, classId, batchNo = '', l
 
   const [rows] = await conn.execute(sql, params);
   return rows[0] || null;
+}
+
+async function getReservedDraft(conn, empEntryId, meritlistId, classId, batchNo, lock = false) {
+  const sql =
+    `SELECT *
+       FROM up_emp
+      WHERE EMP_ENTRY_ID = ?
+        AND MERITLIST_ID = ?
+        AND CLASS_ID = ?
+        AND batch_no = ?
+        AND APPROVAL_STATUS = 'DRAFT'
+      LIMIT 1` + (lock ? ' FOR UPDATE' : '');
+  const [rows] = await conn.execute(
+    sql,
+    [empEntryId, meritlistId, classId, batchNo]
+  );
+  return rows[0] || null;
+}
+
+async function getEmployeeChildren(conn, empEntryId) {
+  const [rows] = await conn.execute(
+    `SELECT FAMILY_ID, EMP_ENTRY_ID, EMPCODE, FNAME, F_OCUP, F_ADD,
+            PHONE, CHILD_NOS, BIRTH_DATE
+       FROM hr_empfamilydet
+      WHERE EMP_ENTRY_ID = ?
+      ORDER BY CHILD_NOS, FAMILY_ID`,
+    [empEntryId]
+  );
+  return rows;
 }
 
 router.get('/app-state', async (req, res, next) => {
@@ -200,14 +230,7 @@ router.post('/employee/lookup', async (req, res, next) => {
       [employee.EMP_ENTRY_ID]
     );
 
-    const [children] = await conn.execute(
-      `SELECT EMP_ENTRY_ID, EMPCODE, FNAME, F_OCUP, F_ADD, PHONE,
-              CHILD_NOS, BIRTH_DATE
-         FROM hr_empfamilydet
-        WHERE EMP_ENTRY_ID = ?
-        ORDER BY CHILD_NOS`,
-      [employee.EMP_ENTRY_ID]
-    );
+    const children = await getEmployeeChildren(conn, employee.EMP_ENTRY_ID);
 
     res.json({
       found: true,
@@ -246,9 +269,11 @@ router.post('/employee/new-entry', async (req, res, next) => {
   const conn = await pool.getConnection();
 
   try {
+    await conn.beginTransaction();
     const active = await getActiveBatch(conn);
 
     if (!active) {
+      await conn.rollback();
       return res.status(409).json({
         message: 'New employee submissions are available only while a batch is ACTIVE.'
       });
@@ -258,7 +283,8 @@ router.post('/employee/new-entry', async (req, res, next) => {
       conn,
       meritlistId,
       classId,
-      active.BATCH_NO
+      active.BATCH_NO,
+      true
     );
 
     if (existing) {
@@ -272,18 +298,14 @@ router.post('/employee/new-entry', async (req, res, next) => {
           [existing.EMP_ENTRY_ID]
         );
 
-        const [children] = await conn.execute(
-          `SELECT EMP_ENTRY_ID, EMPCODE, FNAME, F_OCUP, F_ADD, PHONE,
-                  CHILD_NOS, BIRTH_DATE
-             FROM hr_empfamilydet
-            WHERE EMP_ENTRY_ID = ?
-            ORDER BY CHILD_NOS`,
-          [existing.EMP_ENTRY_ID]
-        );
+        const children = await getEmployeeChildren(conn, existing.EMP_ENTRY_ID);
+
+        await conn.commit();
 
         return res.json({
           canCreate: true,
           resumeDraft: true,
+          empEntryId: existing.EMP_ENTRY_ID,
           activeBatch: active.BATCH_NO,
           identity: { meritlistId, classId },
           employee: existing,
@@ -292,18 +314,35 @@ router.post('/employee/new-entry', async (req, res, next) => {
         });
       }
 
+      await conn.rollback();
       return res.status(409).json({
-        message: `This Merit List ID and Class ID already exists in batch ${active.BATCH_NO}. Duplicates are not allowed within the same batch.`
+        message: `This employee entry was already ${existing.APPROVAL_STATUS.toLowerCase()} in batch ${active.BATCH_NO}. Use a different Merit List ID and Class ID for a new employee.`
       });
     }
 
+    const [result] = await conn.execute(
+      `INSERT INTO up_emp
+       (MERITLIST_ID, CLASS_ID, NATIONALITY, batch_no, APPROVAL_STATUS, CREATED_AT)
+       VALUES (?, ?, 'Bangladeshi', ?, 'DRAFT', NOW())`,
+      [meritlistId, classId, active.BATCH_NO]
+    );
+
+    await conn.commit();
+
     res.json({
       canCreate: true,
+      draftCreated: true,
+      empEntryId: result.insertId,
       activeBatch: active.BATCH_NO,
       identity: { meritlistId, classId }
     });
 
   } catch (e) {
+    await conn.rollback();
+    if (e.code === 'ER_DUP_ENTRY') {
+      e.status = 409;
+      e.message = 'This Merit List ID and Class ID was just started in the active batch. Start again to resume its saved draft.';
+    }
     next(e);
   } finally {
     conn.release();
@@ -312,7 +351,8 @@ router.post('/employee/new-entry', async (req, res, next) => {
 
 router.post('/employee/save', async (req, res, next) => {
   const newEntry = Boolean(req.body?.newEntry);
-  const submitForApproval = !newEntry || req.body?.submitForApproval !== false;
+  const submitForApproval = req.body?.submitForApproval !== false;
+  const draftEntryId = Number.parseInt(req.body?.draftEntryId, 10) || null;
   const identity = {
     meritlistId: String(req.body?.identity?.meritlistId || '').trim(),
     classId: String(req.body?.identity?.classId || '').trim(),
@@ -343,14 +383,9 @@ router.post('/employee/save', async (req, res, next) => {
   validateEmployee(employee, { required: submitForApproval });
 
   let normalizedEducation;
-  try {
-    normalizedEducation = validateAndNormalizeEducation(education, { required: submitForApproval });
-  } catch (e) {
-    return next(e);
-  }
-
   let normalizedChildren;
   try {
+    normalizedEducation = validateAndNormalizeEducation(education, { required: submitForApproval });
     normalizedChildren = validateAndNormalizeChildren(children, {
       married: employee.MARITAL_STATUS === 'M'
     });
@@ -383,13 +418,29 @@ router.post('/employee/save', async (req, res, next) => {
         );
       }
 
-      current = await getEmployeeByIdentity(
-        conn,
-        identity.meritlistId,
-        identity.classId,
-        active.BATCH_NO,
-        true
-      );
+      current = draftEntryId
+        ? await getReservedDraft(
+            conn,
+            draftEntryId,
+            identity.meritlistId,
+            identity.classId,
+            active.BATCH_NO,
+            true
+          )
+        : await getEmployeeByIdentity(
+            conn,
+            identity.meritlistId,
+            identity.classId,
+            active.BATCH_NO,
+            true
+          );
+
+      if (draftEntryId && !current) {
+        throw Object.assign(
+          new Error('This draft is no longer available. Return to New Employee and check the Merit List ID and Class ID again.'),
+          { status: 409 }
+        );
+      }
     } else {
       current = await getVerifiedEmployee(
         conn,
@@ -458,8 +509,7 @@ router.post('/employee/save', async (req, res, next) => {
       const [result] = await conn.execute(
         `INSERT INTO up_emp
          (${insertCols.join(',')}, CREATED_AT)
-         VALUES (${insertCols.map(() => '?').join(',')}, NOW())
-         RETURNING EMP_ENTRY_ID`,
+         VALUES (${insertCols.map(() => '?').join(',')}, NOW())`,
         values
       );
 
@@ -487,6 +537,11 @@ router.post('/employee/save', async (req, res, next) => {
 
       await conn.execute(
         `DELETE FROM hr_empexamdet WHERE EMP_ENTRY_ID = ?`,
+        [current.EMP_ENTRY_ID]
+      );
+
+      await conn.execute(
+        `DELETE FROM hr_empfamilydet WHERE EMP_ENTRY_ID = ?`,
         [current.EMP_ENTRY_ID]
       );
 
@@ -529,6 +584,11 @@ router.post('/employee/save', async (req, res, next) => {
           WHERE EMP_ENTRY_ID = ?`,
         [current.EMP_ENTRY_ID]
       );
+
+      await conn.execute(
+        `DELETE FROM hr_empfamilydet WHERE EMP_ENTRY_ID = ?`,
+        [current.EMP_ENTRY_ID]
+      );
     }
 
     for (const [index, row] of normalizedEducation.entries()) {
@@ -539,7 +599,7 @@ router.post('/employee/save', async (req, res, next) => {
          VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
         [
           empEntryId,
-          index + 1,
+          row.SLNO || index + 1,
           ipi,
           row.EXAMNAME || null,
           row.EXAMGROUP || null,
@@ -553,12 +613,7 @@ router.post('/employee/save', async (req, res, next) => {
       );
     }
 
-    await conn.execute(
-      `DELETE FROM hr_empfamilydet WHERE EMP_ENTRY_ID = ?`,
-      [empEntryId]
-    );
-
-    for (const [index, child] of normalizedChildren.entries()) {
+    for (const child of normalizedChildren) {
       await conn.execute(
         `INSERT INTO hr_empfamilydet
          (EMP_ENTRY_ID, EMPCODE, FNAME, F_OCUP, F_ADD, PHONE, CHILD_NOS, BIRTH_DATE)
@@ -570,7 +625,7 @@ router.post('/employee/save', async (req, res, next) => {
           child.F_OCUP || null,
           child.F_ADD || null,
           child.PHONE || null,
-          index + 1,
+          child.CHILD_NOS,
           child.BIRTH_DATE || null
         ]
       );
@@ -592,7 +647,10 @@ router.post('/employee/save', async (req, res, next) => {
 
   } catch (e) {
     await conn.rollback();
-    if (e.code === 'ER_DUP_ENTRY') {
+    if (
+      e.code === 'ER_DUP_ENTRY'
+      && /UK_EMP_BATCH_MERIT_CLASS/i.test(String(e.sqlMessage || ''))
+    ) {
       e.status = 409;
       e.message = 'This Merit List ID and Class ID already exists in the active batch. Duplicates are not allowed within the same batch.';
     }

@@ -26,15 +26,34 @@ const users = ref([]);
 const batches = ref([]);
 const requests = ref([]);
 const employees = ref([]);
+const selectedEmployeeIds = ref([]);
+const bulkApprovalBusy = ref(false);
 const correctionModalOpen = ref(false);
 const correctionEmployee = ref(null);
 const correctionNote = ref('');
+const ipiModalOpen = ref(false);
+const ipiEmployee = ref(null);
+const ipiValue = ref('');
+const ipiSaving = ref(false);
+const ipiError = ref('');
 const newBatch = ref('');
 const batchModalOpen = ref(false);
 const batchEditor = reactive({ originalBatchNo: '', batchNo: '', status: 'INACTIVE' });
 const employeeBatchFilter = ref('');
 const employeeSearch = ref('');
 const batchFilterOptions = computed(() => batches.value.map(batch => ({ value: batch.BATCH_NO, label: `${batch.BATCH_NO} (${batch.STATUS})` })));
+const selectableEmployees = computed(() => employees.value.filter(employee => ['PENDING', 'REJECTED'].includes(employee.APPROVAL_STATUS)));
+const allVisibleEmployeesSelected = computed({
+  get() {
+    return selectableEmployees.value.length > 0
+      && selectableEmployees.value.every(employee => selectedEmployeeIds.value.includes(employee.EMP_ENTRY_ID));
+  },
+  set(checked) {
+    selectedEmployeeIds.value = checked
+      ? selectableEmployees.value.map(employee => employee.EMP_ENTRY_ID)
+      : [];
+  }
+});
 const newUser = reactive({ username: '', displayName: '', password: '', userType: 'ADMIN' });
 const userModalOpen = ref(false);
 const editUserModalOpen = ref(false);
@@ -126,6 +145,8 @@ async function refresh() {
     batches.value = b.data;
     requests.value = r.data;
     employees.value = e.data;
+    const selectableIds = new Set(selectableEmployees.value.map(employee => employee.EMP_ENTRY_ID));
+    selectedEmployeeIds.value = selectedEmployeeIds.value.filter(id => selectableIds.has(id));
     users.value = u?.data || [];
     if (!isSuperAdmin.value && activeSection.value === 'users') activeSection.value = 'employees';
   } catch (e) {
@@ -328,18 +349,92 @@ async function approveEmployee(employee, approvalStatus) {
   }
 }
 
-async function assignIpi(employee) {
+function assignIpi(employee) {
   clearActionFeedback();
-  const ipi = window.prompt(`Assign IPI\nMerit List ID: ${employee.MERITLIST_ID}\nClass ID: ${employee.CLASS_ID}`, employee.IPI || '');
-  if (ipi === null) return;
+  ipiEmployee.value = employee;
+  ipiValue.value = employee.IPI || '';
+  ipiError.value = '';
+  ipiModalOpen.value = true;
+}
+
+function closeIpiModal() {
+  if (ipiSaving.value) return;
+  ipiModalOpen.value = false;
+  ipiEmployee.value = null;
+  ipiValue.value = '';
+  ipiError.value = '';
+}
+
+async function saveIpi() {
+  const employee = ipiEmployee.value;
+  const ipi = ipiValue.value.trim();
+
+  if (!employee) return;
+  if (!ipi) {
+    ipiError.value = 'IPI is required.';
+    return;
+  }
+
+  ipiSaving.value = true;
+  ipiError.value = '';
+
   try {
-    const { data } = await api.patch(`/admin/employees/${employee.EMP_ENTRY_ID}/ipi`, { ipi: ipi.trim() });
+    const { data } = await api.patch(`/admin/employees/${employee.EMP_ENTRY_ID}/ipi`, { ipi });
     message.value = data.message;
     notifySuccess(message.value, 'IPI assigned');
+    ipiModalOpen.value = false;
+    ipiEmployee.value = null;
+    ipiValue.value = '';
+    await refresh();
+  } catch (e) {
+    ipiError.value = e.response?.data?.message || e.message;
+    message.value = ipiError.value;
+    notifyError(ipiError.value, 'IPI could not be assigned');
+  } finally {
+    ipiSaving.value = false;
+  }
+}
+
+async function bulkApproveEmployees(approveAllSubmitted = false) {
+  clearActionFeedback();
+
+  const selectedCount = selectedEmployeeIds.value.length;
+  if (!approveAllSubmitted && !selectedCount) return;
+
+  const confirmation = approveAllSubmitted
+    ? 'Approve every pending employee submission? Drafts and rejected records will not be changed.'
+    : `Approve ${selectedCount} selected employee${selectedCount === 1 ? '' : 's'}?`;
+
+  if (!window.confirm(confirmation)) return;
+
+  bulkApprovalBusy.value = true;
+  try {
+    const { data } = await api.patch('/admin/employees/approval/bulk', approveAllSubmitted
+      ? { approveAllSubmitted: true }
+      : { employeeIds: selectedEmployeeIds.value });
+
+    const details = [];
+    if (data.failedCount) details.push(`${data.failedCount} incomplete submission${data.failedCount === 1 ? '' : 's'} could not be approved`);
+    if (data.skippedCount) details.push(`${data.skippedCount} unchanged because the status was no longer eligible`);
+    const firstFailure = data.failures?.[0];
+    const failureExample = firstFailure
+      ? ` First issue: ${firstFailure.name || `employee #${firstFailure.employeeId}`} — ${firstFailure.message}`
+      : '';
+    message.value = `${data.message}${details.length ? ` ${details.join('; ')}.` : ''}${failureExample}`;
+
+    if (data.failedCount || data.skippedCount) {
+      notifyError(message.value, data.approvedCount ? 'Approval partially completed' : 'Employees could not be approved');
+    } else {
+      notifySuccess(message.value, 'Employees approved');
+    }
+
+    selectedEmployeeIds.value = [];
     await refresh();
   } catch (e) {
     message.value = e.response?.data?.message || e.message;
-    notifyError(message.value, 'IPI could not be assigned');
+    notifyError(message.value, 'Employees could not be approved');
+  } finally {
+    bulkApprovalBusy.value = false;
   }
 }
 
@@ -613,14 +708,64 @@ onMounted(refresh);
 
       <section v-if="activeSection === 'employees'" class="card">
           <div class="section-title"><div><h2>{{ t('Employee List') }}</h2><p class="muted">New submissions must be approved before an employee can update their data.</p></div><div class="employee-filters"><input v-model="employeeSearch" placeholder="Search name, ID, IPI or phone" @keyup.enter="refresh" /><AutoCompleteSelect v-model="employeeBatchFilter" :options="batchFilterOptions" :placeholder="t('Search batch')" /><button @click="refresh">{{ t('Search') }}</button></div></div>
+          <div class="bulk-approval-bar">
+            <span>{{ selectedEmployeeIds.length }} {{ t('selected') }}</span>
+            <button class="primary" :disabled="bulkApprovalBusy || !selectedEmployeeIds.length" @click="bulkApproveEmployees(false)">{{ t(bulkApprovalBusy ? 'Approving…' : 'Approve Selected') }}</button>
+            <button :disabled="bulkApprovalBusy" @click="bulkApproveEmployees(true)">{{ t('Approve All Submitted') }}</button>
+          </div>
           <div class="table-wrap"><table>
-            <thead><tr><th>{{ t('Merit List ID') }}</th><th>{{ t('Class ID') }}</th><th>{{ t('Name') }}</th><th>{{ t('Phone') }}</th><th>{{ t('Batch') }}</th><th>{{ t('Approval Status') }}</th><th>{{ t('IPI') }}</th><th>{{ t('Actions') }}</th></tr></thead>
+            <thead><tr><th class="select-cell"><input v-model="allVisibleEmployeesSelected" type="checkbox" :disabled="!selectableEmployees.length || bulkApprovalBusy" :aria-label="t('Select all eligible employees on this page')" /></th><th>{{ t('Merit ID') }}</th><th>{{ t('Class ID') }}</th><th>{{ t('Name') }}</th><th>{{ t('Phone') }}</th><th>{{ t('Batch') }}</th><th>{{ t('Status') }}</th><th>{{ t('IPI') }}</th><th>{{ t('Actions') }}</th></tr></thead>
             <tbody>
-              <tr v-for="employee in employees" :key="employee.EMP_ENTRY_ID"><td>{{ employee.MERITLIST_ID }}</td><td>{{ employee.CLASS_ID }}</td><td>{{ employee.NAME }}</td><td>{{ employee.PHONE }}</td><td>{{ employee.batch_no }}</td><td>{{ t(employee.APPROVAL_STATUS === 'DRAFT' ? 'Draft' : employee.APPROVAL_STATUS === 'PENDING' ? 'Pending' : employee.APPROVAL_STATUS === 'APPROVED' ? 'Approved' : 'Rejected') }}<small v-if="employee.APPROVAL_STATUS === 'DRAFT'" class="status-note">{{ t('Waiting for employee submission') }}</small></td><td>{{ employee.IPI || t('Not assigned') }}</td><td class="actions-cell"><router-link class="button-link" :to="{ name: 'admin-employee-edit', params: { empEntryId: employee.EMP_ENTRY_ID } }">{{ t('Edit Details') }}</router-link><button v-if="['PENDING', 'REJECTED'].includes(employee.APPROVAL_STATUS)" class="primary" @click="approveEmployee(employee, 'APPROVED')">{{ t('Approve') }}</button><button v-if="employee.APPROVAL_STATUS === 'PENDING'" class="danger" @click="approveEmployee(employee, 'REJECTED')">{{ t('Reject') }}</button><button @click="assignIpi(employee)">{{ t(employee.IPI ? 'Change IPI' : 'Assign IPI') }}</button><button v-if="employee.APPROVAL_STATUS === 'APPROVED'" @click="openCorrectionModal(employee)">{{ t('Send for Correction') }}</button><button v-if="isSuperAdmin" class="danger" @click="deleteEmployee(employee)">{{ t('Delete') }}</button></td></tr>
-              <tr v-if="!employees.length"><td colspan="8">No employees found.</td></tr>
+              <tr v-for="employee in employees" :key="employee.EMP_ENTRY_ID"><td class="select-cell"><input v-if="['PENDING', 'REJECTED'].includes(employee.APPROVAL_STATUS)" v-model="selectedEmployeeIds" type="checkbox" :value="employee.EMP_ENTRY_ID" :disabled="bulkApprovalBusy" :aria-label="`${t('Select')} ${employee.NAME || employee.MERITLIST_ID}`" /></td><td>{{ employee.MERITLIST_ID }}</td><td>{{ employee.CLASS_ID }}</td><td>{{ employee.NAME }}</td><td>{{ employee.PHONE }}</td><td>{{ employee.batch_no }}</td><td>{{ t(employee.APPROVAL_STATUS === 'DRAFT' ? 'Draft' : employee.APPROVAL_STATUS === 'PENDING' ? 'Pending' : employee.APPROVAL_STATUS === 'APPROVED' ? 'Approved' : 'Rejected') }}</td><td>{{ employee.IPI || t('Not assigned') }}</td><td class="actions-cell"><router-link class="button-link" :to="{ name: 'admin-employee-edit', params: { empEntryId: employee.EMP_ENTRY_ID } }">{{ t('Edit Details') }}</router-link><button v-if="['PENDING', 'REJECTED'].includes(employee.APPROVAL_STATUS)" class="primary" @click="approveEmployee(employee, 'APPROVED')">{{ t('Approve') }}</button><button v-if="employee.APPROVAL_STATUS === 'PENDING'" class="danger" @click="approveEmployee(employee, 'REJECTED')">{{ t('Reject') }}</button><button v-if="employee.APPROVAL_STATUS === 'APPROVED'" @click="assignIpi(employee)">{{ t(employee.IPI ? 'Change IPI' : 'Assign IPI') }}</button><button v-if="employee.APPROVAL_STATUS === 'APPROVED'" @click="openCorrectionModal(employee)">{{ t('Send for Correction') }}</button><button v-if="isSuperAdmin" class="danger" @click="deleteEmployee(employee)">{{ t('Delete') }}</button></td></tr>
+              <tr v-if="!employees.length"><td colspan="9">No employees found.</td></tr>
             </tbody>
           </table></div>
       </section>
+
+      <div v-if="ipiModalOpen" class="modal-backdrop" @click.self="closeIpiModal">
+        <form class="card modal ipi-modal" role="dialog" aria-modal="true" aria-labelledby="ipi-modal-title" @submit.prevent="saveIpi">
+          <div class="ipi-modal-header">
+            <div class="ipi-modal-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M4 7.5h16M7.5 4v7M16.5 4v7M5 12.5h14a1 1 0 0 1 1 1V19a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-5.5a1 1 0 0 1 1-1Z"/><path d="M8 16.25h3"/></svg>
+            </div>
+            <div>
+              <span>{{ t('Employee identification') }}</span>
+              <h2 id="ipi-modal-title">{{ t(ipiEmployee?.IPI ? 'Change IPI' : 'Assign IPI') }}</h2>
+            </div>
+            <button class="ipi-modal-close" type="button" :disabled="ipiSaving" :aria-label="t('Close')" @click="closeIpiModal">×</button>
+          </div>
+
+          <div class="ipi-modal-body">
+            <div class="ipi-employee-summary">
+              <div><span>{{ t('Employee') }}</span><strong>{{ ipiEmployee?.NAME || '—' }}</strong></div>
+              <div><span>{{ t('Merit List ID') }}</span><strong>{{ ipiEmployee?.MERITLIST_ID }}</strong></div>
+              <div><span>{{ t('Class ID') }}</span><strong>{{ ipiEmployee?.CLASS_ID }}</strong></div>
+            </div>
+
+            <label for="ipi-value">{{ t('IPI') }}<span class="required-mark"> *</span></label>
+            <input
+              id="ipi-value"
+              v-model="ipiValue"
+              maxlength="50"
+              autocomplete="off"
+              autofocus
+              :class="{ 'field-error': ipiError }"
+              :placeholder="t('Enter IPI number')"
+              :disabled="ipiSaving"
+              @input="ipiError = ''"
+            />
+            <p v-if="ipiError" class="ipi-modal-error" role="alert">{{ ipiError }}</p>
+            <p v-else class="muted ipi-modal-hint">{{ t('IPI must be unique for each approved employee.') }}</p>
+
+            <div class="modal-actions ipi-modal-actions">
+              <button type="button" :disabled="ipiSaving" @click="closeIpiModal">{{ t('Cancel') }}</button>
+              <button class="primary" type="submit" :disabled="ipiSaving" :aria-busy="ipiSaving">
+                {{ t(ipiSaving ? 'Saving…' : 'Save IPI') }}
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>
 
       <div v-if="correctionModalOpen" class="modal-backdrop" @click.self="correctionModalOpen = false">
         <section class="card modal" role="dialog" aria-modal="true" aria-labelledby="correction-title">
