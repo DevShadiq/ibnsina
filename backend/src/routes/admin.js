@@ -583,6 +583,8 @@ router.get('/employees', async (req, res, next) => {
   try {
     const batchNo = String(req.query.batchNo || '').trim();
     const search = String(req.query.search || '').trim();
+    const meritId = String(req.query.meritId || '').trim();
+    const classId = String(req.query.classId || '').trim();
     const params = [];
     const conditions = [];
 
@@ -601,6 +603,16 @@ router.get('/employees', async (req, res, next) => {
         e.PHONE ILIKE ?
       )`);
       params.push(searchValue, searchValue, searchValue, searchValue, searchValue);
+    }
+
+    if (meritId) {
+      conditions.push('e.MERITLIST_ID ILIKE ?');
+      params.push(`%${meritId}%`);
+    }
+
+    if (classId) {
+      conditions.push('e.CLASS_ID ILIKE ?');
+      params.push(`%${classId}%`);
     }
 
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
